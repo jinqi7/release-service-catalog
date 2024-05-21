@@ -22,6 +22,9 @@ the rh-push-to-registry-redhat-io pipeline.
 | taskGitUrl | The url to the git repo where the release-service-catalog tasks to be used are stored | Yes | https://github.com/konflux-ci/release-service-catalog.git |
 | taskGitRevision | The revision in the taskGitUrl repo to be used | No | - |
 
+## Changes in 0.7.1
+- Remove the releaseServiceConfig parameter to the create-advisory task
+
 ## Changes in 0.7.0
 - The apply-mapping task now gets the dataPath parameter instead of releasePlanAdmissionPath
 
