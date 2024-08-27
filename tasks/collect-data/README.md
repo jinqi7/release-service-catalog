@@ -27,6 +27,9 @@ should not be present in the Release data section).
 | snapshot             | Namespaced name of the Snapshot                    | No       | -             |
 | subdirectory         | Subdirectory inside the workspace to be used.      | Yes      | -             |
 
+## Changes in 4.6.0
+  * Fixed linting issues in this task and test files 
+
 ## Changes in 4.5.0
   * Updated the base image used in this task
 

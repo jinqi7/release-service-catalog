@@ -3,7 +3,8 @@ name: Linters
 on:  # yamllint disable-line rule:truthy
   pull_request:
     types: ['opened', 'reopened', 'synchronize']
-  workflow_dispatch:
+    branches: [development]
+#  workflow_dispatch:
 jobs:
   yamllint:
     runs-on: ubuntu-latest
@@ -56,6 +57,7 @@ jobs:
         uses: chmeliik/checkton@v0.1.2 
         # Migrating to the konflux-ci org
         with:
+          differential: false
           fail-on-findings: true
           find-copies-harder: true
         continue-on-error: true 
