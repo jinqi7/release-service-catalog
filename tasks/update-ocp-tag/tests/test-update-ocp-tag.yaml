@@ -27,9 +27,9 @@ spec:
               cat > $(workspaces.data.path)/data.json << EOF
               {
                 "fbc": {
-                  "fromIndex": "registry-proxy.engineering.redhat.com/rh-osbs/iib-preview-rhtap:v4.12",
-                  "targetIndex": "quay.io/redhat/redhat----preview-operator-index:v4.12",
-                  "binaryImage": "registry.redhat.io/openshift4/ose-operator-registry:v4.12"
+                  "fromIndex": "registry-proxy.engineering.redhat.com/rh-osbs/iib-preview-rhtap:{{ OCP_VERSION }}",
+                  "targetIndex": "quay.io/redhat/redhat----preview-operator-index:{{ OCP_VERSION }}",
+                  "binaryImage": "registry.redhat.io/openshift4/ose-operator-registry:{{ OCP_VERSION }}"
                 }
               }
               EOF
