@@ -1,4 +1,5 @@
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.4-1227.1726694542
+FROM scratch
+#FROM registry.access.redhat.com/ubi9/ubi-minimal:9.4-1227.1726694542
 
 # It is mandatory to set these labels
 LABEL name="Konflux Release Service Catalog"
