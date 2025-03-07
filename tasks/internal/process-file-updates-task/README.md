@@ -17,6 +17,9 @@ replacements to a yaml file that already exists. It will attempt to create a Mer
 | internalRequestPipelineRunName | name of the PipelineRun that called this task                                                                                                                                            | No       | -                                        |
 
 
+## Changes in 1.1.0
+* Use git diff branch1 branch2 to do comparation for idempotent 
+
 ## Changes in 1.0.1
 * Remove extra characters in the diff result
 
