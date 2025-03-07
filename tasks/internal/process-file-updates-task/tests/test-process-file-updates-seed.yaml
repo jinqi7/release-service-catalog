@@ -80,8 +80,8 @@ spec:
               #!/usr/bin/env bash
               set -eux
 
-              echo Test that merge_request can be parsed
-              test "$(jq -r .merge_request <<< "$(params.fileUpdatesInfo)")" == "/merge_request/1"
+              echo "Test that status is Success"
+              test "$(params.fileUpdatesState)" == "Success"
 
               cd "$(params.tempDir)/one-update"
               commits=$(git log --oneline | wc -l)
