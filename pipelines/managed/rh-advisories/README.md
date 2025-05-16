@@ -28,6 +28,25 @@ the rh-push-to-registry-redhat-io pipeline.
 | trustedArtifactsDebug           | Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable                                             | Yes      | ""                                                        |
 | dataDir                         | The location where data will be stored                                                                                             | Yes      | /var/workdir/release                                      |
 
+## Changes in 2.0.6
+* set-advisory-severity should use the artifacts from embargo-check
+
+## Changes in 2.0.5
+* This pipeline is now using trusted artifacts. Therefore, we can remove the comments and timeouts
+  added to workaround PVC contention issues.
+
+## Changes in 2.0.4
+* Don't allow the `upload-product-sbom` task to fail anymore.
+  * The issue should be resolved by curl retrying on all errors.
+
+## Changes in 2.0.3
+* Correct missing severity in advisory due to incorrect sourceDataArtifact
+
+## Changes in 2.0.2
+* Temporarily allow the `close-advisory-issues` task to fail
+  * Until https://issues.redhat.com/browse/KONFLUX-7489 is fixed
+  * The task fails if the transition scheme is unexpected
+
 ## Changes in 2.0.1
 * Temporarily allow the `upload-product-sbom` task to fail
   * The upload to S3 started giving us 503 errors. It will be investigated in ISV-5887

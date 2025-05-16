@@ -4,7 +4,7 @@ kind: Pipeline
 metadata:
   name: rh-advisories
   labels:
-    app.kubernetes.io/version: "2.0.1"
+    app.kubernetes.io/version: "2.0.6"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
@@ -283,7 +283,6 @@ spec:
       runAfter:
         - apply-mapping
     - name: populate-release-notes
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       params:
         - name: dataPath
           value: "$(tasks.collect-data.results.data)"
@@ -316,7 +315,6 @@ spec:
         - name: data
           workspace: release-workspace
     - name: embargo-check
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       params:
         - name: dataPath
           value: "$(tasks.collect-data.results.data)"
@@ -358,7 +356,7 @@ spec:
         - name: ociStorage
           value: $(params.ociStorage)
         - name: sourceDataArtifact
-          value: "$(tasks.populate-release-notes.results.sourceDataArtifact)"
+          value: "$(tasks.embargo-check.results.sourceDataArtifact)"
         - name: dataDir
           value: $(params.dataDir)
         - name: trustedArtifactsDebug
@@ -381,6 +379,7 @@ spec:
           workspace: release-workspace
       runAfter:
         - populate-release-notes
+        - embargo-check
     - name: collect-cosign-params
       taskRef:
         resolver: "git"
@@ -575,7 +574,6 @@ spec:
         - publish-pyxis-repository
         - extract-requester-from-release
     - name: create-pyxis-image
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       retries: 5
       taskRef:
         resolver: "git"
@@ -615,7 +613,6 @@ spec:
       runAfter:
         - push-snapshot
     - name: publish-pyxis-repository
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       retries: 5
       taskRef:
         resolver: "git"
@@ -656,7 +653,6 @@ spec:
         - collect-pyxis-params
         - apply-mapping
     - name: push-rpm-data-to-pyxis
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       retries: 5
       taskRef:
         resolver: "git"
@@ -694,7 +690,6 @@ spec:
       runAfter:
         - create-pyxis-image
     - name: update-component-sbom
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       when:
         - input: "$(tasks.collect-atlas-params.results.secretName)"
           operator: notin
@@ -736,7 +731,6 @@ spec:
         - push-rpm-data-to-pyxis
         - populate-release-notes
     - name: upload-component-sbom
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       when:
         - input: "$(tasks.collect-atlas-params.results.secretName)"
           operator: notin
@@ -783,7 +777,6 @@ spec:
       runAfter:
         - update-component-sbom
     - name: run-file-updates
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       params:
         - name: fileUpdatesPath
           value: $(tasks.collect-data.results.data)
@@ -823,7 +816,6 @@ spec:
         - name: data
           workspace: release-workspace
     - name: check-data-keys
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       params:
         - name: dataPath
           value: "$(tasks.collect-data.results.data)"
@@ -862,7 +854,6 @@ spec:
       runAfter:
         - populate-release-notes
     - name: collect-atlas-params
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       taskRef:
         resolver: "git"
         params:
@@ -893,7 +884,6 @@ spec:
       runAfter:
         - collect-data
     - name: create-product-sbom
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       when:
         - input: "$(tasks.collect-atlas-params.results.secretName)"
           operator: notin
@@ -929,7 +919,6 @@ spec:
         - collect-atlas-params
         - populate-release-notes
     - name: upload-product-sbom
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       when:
         - input: "$(tasks.collect-atlas-params.results.secretName)"
           operator: notin
@@ -975,9 +964,7 @@ spec:
           workspace: release-workspace
       runAfter:
         - create-product-sbom
-      onError: continue
     - name: create-advisory
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       retries: 5
       params:
         - name: releasePlanAdmissionPath
@@ -993,7 +980,7 @@ spec:
         - name: ociStorage
           value: $(params.ociStorage)
         - name: sourceDataArtifact
-          value: "$(tasks.populate-release-notes.results.sourceDataArtifact)"
+          value: "$(tasks.set-advisory-severity.results.sourceDataArtifact)"
         - name: dataDir
           value: $(params.dataDir)
         - name: trustedArtifactsDebug
@@ -1023,7 +1010,7 @@ spec:
         - rh-sign-image-cosign
         - set-advisory-severity
     - name: close-advisory-issues
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
+      onError: continue  # until https://issues.redhat.com/browse/KONFLUX-7489 is fixed
       params:
         - name: dataPath
           value: "$(tasks.collect-data.results.data)"

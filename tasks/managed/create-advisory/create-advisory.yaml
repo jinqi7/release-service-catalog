@@ -4,7 +4,7 @@ kind: Task
 metadata:
   name: create-advisory
   labels:
-    app.kubernetes.io/version: "6.0.0"
+    app.kubernetes.io/version: "6.1.2"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
@@ -76,6 +76,8 @@ spec:
   results:
     - name: advisory_url
       description: The advisory url if one was created
+    - name: advisory_internal_url
+      description: The advisory internal url if one was created
     - description: Produced trusted data artifact
       name: sourceDataArtifact
       type: string
@@ -128,7 +130,7 @@ spec:
       image: quay.io/konflux-ci/release-service-utils:0f82be4be43294b6a96846d87ef7f7c0b9e34267
       script: |
         #!/bin/bash
-        set -ex
+        set -exo pipefail
 
         DEFAULT_ADVISORY_TYPE="RHBA"
         RESULTS_FILE="$(params.dataDir)/$(params.resultsDirPath)/create-advisory-results.json"
@@ -142,6 +144,14 @@ spec:
         # Extract the advisory key and signing configMap name from the data JSON file
         advisoryData=$(jq -c "$(params.jsonKey)" "$(params.dataDir)/$(params.dataPath)")
         configMapName=$(jq -er '.sign.configMapName' "$(params.dataDir)/$(params.dataPath)")
+
+        # Check custom advisory live id
+        advisoryLiveId=$(jq -r '.live_id' <<< "$advisoryData")
+        advisoryAllowCustomLiveId=$(jq -r '.allow_custom_live_id // false' <<< "$advisoryData")
+        if [ "$advisoryAllowCustomLiveId" != true ] && [ "$advisoryLiveId" != "null" ]; then
+          echo "Error: advisory live id is only allowed if allow_custom_live_id is set to true"
+          exit 1
+        fi
 
         # Validate type
         advisoryType=$(jq -r '.type' <<< "$advisoryData")
@@ -246,8 +256,7 @@ spec:
                          -p taskGitRevision="$(params.taskGitRevision)" \
                          -s "$(params.synchronously)" \
                          -l ${pipelinerun_label}="$(params.pipelineRunUid)" \
-                         > "$IR_FILE" || \
-                         (grep "^\[" "$IR_FILE" | jq . && exit 1)
+                         | tee "$IR_FILE" || exit 1
 
         internalRequest=$(awk -F"'" '/created/ { print $2 }' "$IR_FILE")
         echo "done (${internalRequest})"
@@ -270,7 +279,10 @@ spec:
 
         URL=$(echo "${results}" | jq -r '.advisory_url // ""')
         echo -n "$URL" | tee "$(results.advisory_url.path)"
-        jq -n --arg url "$URL" '{"advisory": {"url": $url}}' | tee "$RESULTS_FILE"
+        INTERNAL_URL=$(echo "${results}" | jq -r '.advisory_internal_url // ""')
+        echo -n "$INTERNAL_URL" | tee "$(results.advisory_internal_url.path)"
+        jq -n --arg url "$URL" --arg internal_url "$INTERNAL_URL" \
+          '{"advisory": {"url": $url, "internal_url": $internal_url}}' | tee "$RESULTS_FILE"
     - name: create-trusted-artifact
       ref:
         resolver: "git"

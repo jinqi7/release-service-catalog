@@ -4,7 +4,7 @@ kind: Pipeline
 metadata:
   name: rh-push-to-registry-redhat-io
   labels:
-    app.kubernetes.io/version: "5.0.0"
+    app.kubernetes.io/version: "5.0.1"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
@@ -144,7 +144,6 @@ spec:
       runAfter:
         - verify-access-to-resources
     - name: check-data-keys
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       params:
         - name: dataPath
           value: "$(tasks.collect-data.results.data)"
@@ -509,7 +508,6 @@ spec:
         - publish-pyxis-repository
         - extract-requester-from-release
     - name: create-pyxis-image
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       retries: 5
       taskRef:
         resolver: "git"
@@ -549,7 +547,6 @@ spec:
       runAfter:
         - push-snapshot
     - name: publish-pyxis-repository
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       retries: 5
       taskRef:
         resolver: "git"
@@ -590,7 +587,6 @@ spec:
         - collect-pyxis-params
         - apply-mapping
     - name: push-rpm-data-to-pyxis
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       retries: 5
       taskRef:
         resolver: "git"
@@ -628,7 +624,6 @@ spec:
       runAfter:
         - create-pyxis-image
     - name: run-file-updates
-      timeout: "4h"  # temp workaround until github.com/konflux-ci/release-service/issues/603 is fixed
       params:
         - name: fileUpdatesPath
           value: $(tasks.collect-data.results.data)

@@ -4,7 +4,7 @@ kind: Task
 metadata:
   name: embargo-check
   labels:
-    app.kubernetes.io/version: "2.0.1"
+    app.kubernetes.io/version: "2.1.0"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
@@ -22,7 +22,7 @@ spec:
       type: string
     - name: requestTimeout
       type: string
-      default: "180"
+      default: "2700"
       description: InternalRequest timeout
     - name: pipelineRunUid
       type: string
@@ -165,7 +165,8 @@ spec:
             CURL_RC=$?
             set -x
             if [ "$CURL_RC" -ne 0 ] ; then
-                echo "Error: ${issue} is not visible. Assuming it is embargoed and stopping pipelineRun execution."
+                echo "Error: ${issue} is not visible. Assuming it is embargoed and stopping pipelineRun execution." \
+                    | tee -a /tmp/errors.txt
                 RC=1
                 continue
             fi
@@ -180,6 +181,7 @@ spec:
             public=false
 
             if ! "$(jq '.fields | has("security")' <<< "$OUTPUT")" ; then
+                echo "Checking if the issue is public - if not, curl will fail with error 401"
                 if curl-with-retry --retry 3 "${API_URL}" > /dev/null; then
                     public=true
                 fi
@@ -195,24 +197,41 @@ spec:
                 continue
             fi
 
+            if jq -e '.releaseNotes.content.images' "$DATA_FILE" > /dev/null; then
+                CONTENT_TYPE=".releaseNotes.content.images"
+            elif jq -e '.releaseNotes.content.artifacts' "$DATA_FILE" > /dev/null; then
+                CONTENT_TYPE=".releaseNotes.content.artifacts"
+            else
+                echo "No content found under releaseNotes.content.images or .artifacts;"
+                continue
+            fi
+
             CVE_ID=$(jq -r --arg field "$CVE_FIELD" '.fields[$field]' <<< "$OUTPUT")
+
             if [ "$(jq --arg CVE "$CVE_ID" \
-              '.releaseNotes.content.images | map(.cves.fixed | has($CVE)) | any' \
+              "$CONTENT_TYPE"' | map(.cves.fixed | has($CVE)) | any' \
               < "$DATA_FILE")" != "true" ]; then
                 echo "Error: Issue $issue lists 'CVE ID' $CVE_ID" \
-                  "but that CVE is not present in the releaseNotes.content.images section for any image."
+                  "but that CVE is not present in the releaseNotes.content section for any image or artifact." \
+                  "This is likely due to CVE $CVE_ID not being provided in the releaseNotes.cves part of" \
+                  "your Release object." \
+                  | tee -a /tmp/errors.txt
                 RC=1
                 continue
             fi
 
         done
 
+        if [ "$RC" -ne 0 ] ; then
+            echo "Errors were found in the embargo check:"
+            cat /tmp/errors.txt
+        fi
         exit $RC
     - name: check-cves
       image: quay.io/konflux-ci/release-service-utils:10bd7e4323de6ace107bbed1fe40613f21684b01
       script: |
         #!/usr/bin/env bash
-        set -x
+        set -xo pipefail
 
         DATA_FILE="$(params.dataDir)/$(params.dataPath)"
         if [ ! -f "${DATA_FILE}" ] ; then
@@ -222,7 +241,15 @@ spec:
 
         PIPELINERUN_LABEL="internal-services.appstudio.openshift.io/pipelinerun-uid"
 
-        CVES=$(jq -r '.releaseNotes.content.images[] | select(.cves.fixed) | .cves.fixed
+        if jq -e '.releaseNotes.content.images' "$DATA_FILE" > /dev/null; then
+            CONTENT_TYPE=".releaseNotes.content.images"
+        elif jq -e '.releaseNotes.content.artifacts' "$DATA_FILE" > /dev/null; then
+            CONTENT_TYPE=".releaseNotes.content.artifacts"
+        else
+            echo "No content found under releaseNotes.content.images or .artifacts;"
+        fi
+
+        CVES=$(jq -r "$CONTENT_TYPE"'[] | select(.cves.fixed) | .cves.fixed
             | to_entries[] | .key' "${DATA_FILE}" | sort -u | tr "\n" " ")
 
         if [[ ${CVES} == "" ]] ; then
@@ -241,8 +268,7 @@ spec:
             -l ${PIPELINERUN_LABEL}="$(params.pipelineRunUid)" \
             -t "$(params.requestTimeout)" \
             -s true \
-            > "$IR_RESULT_FILE" || \
-            (grep "^\[" "$IR_RESULT_FILE" | jq . && exit 1)
+            | tee "$IR_RESULT_FILE" || exit 1
 
         internalRequest=$(awk -F"'" '/created/ { print $2 }' "$IR_RESULT_FILE")
         echo "done (${internalRequest})"

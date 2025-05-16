@@ -3,7 +3,7 @@
 Tekton task to check if any issues or CVEs in the releaseNotes key of the data.json are embargoed. It checks the issues
 by server using curl and checks the CVEs via an InternalRequest. If any issue does not exist or any CVE is embargoed,
 the task will fail. The task will also fail if a Jira issue listed is for a component that does not exist in the
-releaseNotes.content.images section or if said component does not list the CVE from the issue.
+releaseNotes.content.[images|artifacts] section or if said component does not list the CVE from the issue.
 
 Finally, the task will inject the `public` key to each issue listed for `issues.redhat.com`. This is a boolean value that is set
 based on the issues visibility
@@ -13,7 +13,7 @@ based on the issues visibility
 | Name                    | Description                                                                                                                | Optional | Default value           |
 |-------------------------|----------------------------------------------------------------------------------------------------------------------------|----------|-------------------------|
 | dataPath                | Path to data JSON in the data workspace                                                                                    | No       | -                       |
-| requestTimeout          | InternalRequest timeout                                                                                                    | Yes      | 180                     |
+| requestTimeout          | InternalRequest timeout                                                                                                    | Yes      | 2700                    |
 | pipelineRunUid          | The uid of the current pipelineRun. Used as a label value when creating internal requests                                  | No       | -                       |
 | ociStorage              | The OCI repository where the Trusted Artifacts are stored                                                                  | Yes      | empty                   |
 | ociArtifactExpiresAfter | Expiration date for the trusted artifacts created in the OCI repository. An empty string means the artifacts do not expire | Yes      | 1d                      |
@@ -23,6 +23,24 @@ based on the issues visibility
 | dataDir                 | The location where data will be stored                                                                                     | Yes      | $(workspaces.data.path) |
 | taskGitUrl              | The url to the git repo where the release-service-catalog tasks and stepactions to be used are stored                      | No       | ""                      |
 | taskGitRevision         | The revision in the taskGitUrl repo to be used                                                                             | No       | ""                      |
+## Changes in 2.1.0
+* Handle content types of artifacts with releaseNotes.content.artifacts
+
+## Changes in 2.0.5
+* Improve logging of errors
+  * Print all the errors at the end of the script, so it's clear why the task failed
+  * Add an echo explaining that we're checking if the issue is public - the unauthenticated
+    curl call can fail and throw users off.
+
+## Changes in 2.0.4
+* Update default requestTimeout from 3 mins to 45 mins
+
+## Changes in 2.0.3
+* Improve logging of `internal-request`
+  * Previously we would just swallow the output and if it failed for any reason, the log wouldn't have anything useful
+
+## Changes in 2.0.2
+* Modify wording for error message if CVE not listed in any releaseNotes image
 
 ## Changes in 2.0.1
 * Fix processing of releaseNotes.content.images in situations where some images have no CVEs

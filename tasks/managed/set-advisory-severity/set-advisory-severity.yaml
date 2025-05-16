@@ -4,7 +4,7 @@ kind: Task
 metadata:
   name: set-advisory-severity
   labels:
-    app.kubernetes.io/version: "1.0.1"
+    app.kubernetes.io/version: "1.0.3"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
@@ -12,7 +12,8 @@ spec:
   description: >
     Tekton task to set the severity level in the releaseNotes key of the data.json. It will
     use an InternalRequest to query OSIDB for each CVE present. If the type is not RHSA, no
-    action will be performed.
+    action will be performed. This check is only performed for images and not for generic
+    artifact types like binaries or disk images.
   params:
     - name: dataPath
       description: Path to the JSON string of the merged data to use in the data workspace
@@ -111,7 +112,7 @@ spec:
       image: quay.io/konflux-ci/release-service-utils:0b2f257d7a5c2a881c36c23f8ae3cd5e89db593a
       script: |
         #!/usr/bin/env bash
-        set -x
+        set -xo pipefail
 
         DATA_FILE="$(params.dataDir)/$(params.dataPath)"
         if [ ! -f "${DATA_FILE}" ] ; then
@@ -130,7 +131,15 @@ spec:
         fi
 
         # Ensure RHSA is only used if CVEs are provided
-        NUM_CVES=$(jq '[.releaseNotes.content.images[]?.cves.fixed // [] | length] | add' "${DATA_FILE}")
+        NUM_CVES=$(jq '
+        (
+          [.releaseNotes.content.images // [] | .[]?.cves.fixed // {} | length] |
+          add
+        ) + (
+          [.releaseNotes.content.artifacts // [] | .[]?.cves.fixed // {} | length] |
+          add
+        )
+        ' "${DATA_FILE}")
         if [[ "$advisoryType" == "RHSA" ]] && [[ "$NUM_CVES" -eq 0 ]] ; then
             echo "Provided advisory type is RHSA, but no fixed CVEs were listed"
             echo "RHSA should only be used if CVEs are fixed in the advisory. Failing..."
@@ -138,6 +147,12 @@ spec:
         fi
 
         PIPELINERUN_LABEL="internal-services.appstudio.openshift.io/pipelinerun-uid"
+
+        # Cleanly exit here if generic artifacts are detected.
+        if jq -e '.releaseNotes.content.artifacts | length > 0' "$DATA_FILE" > /dev/null; then
+            echo "Generic artifact type detected, not setting advisory severity"
+            exit 0
+        fi
 
         RELEASENOTESIMAGES=$(jq -c '.releaseNotes.content.images' "${DATA_FILE}")
 
@@ -151,8 +166,7 @@ spec:
             -l ${PIPELINERUN_LABEL}="$(params.pipelineRunUid)" \
             -t "$(params.requestTimeout)" \
             -s true \
-            > "$IR_FILE" || \
-            (grep "^\[" "$IR_FILE" | jq . && exit 1)
+            | tee "$IR_FILE" || exit 1
 
         internalRequest=$(awk -F"'" '/created/ { print $2 }' "$IR_FILE")
         echo "done (${internalRequest})"

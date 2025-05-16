@@ -25,6 +25,10 @@ Tekton pipeline to release content to registry.redhat.io registry.
 | trustedArtifactsDebug           | Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable                                             | Yes      | ""                                                        |
 | dataDir                         | The location where data will be stored                                                                                             | Yes      | /var/workdir/release                                      | 
 
+## Changes in 5.0.1
+* This pipeline is now using trusted artifacts. Therefore, we can remove the comments and timeouts
+  added to workaround PVC contention issues.
+
 ## Changes in 5.0.0
 * Activate the use of trusted artifacts
 * Use the verify-conforma task to verify the enterprise contract policy
