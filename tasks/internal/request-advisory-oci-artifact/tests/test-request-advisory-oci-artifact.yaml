@@ -1,0 +1,51 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-create-advisory-oci-artifact-task
+spec:
+  description: |
+    Run the create-advisory-oci-artifact-task task and check that an oci artifact is generated
+  tasks:
+    - name: run-task
+      taskRef:
+        name: request-advisory-oci-artifact
+      params:
+        - name: advisory_url
+          value: https://some-url.com/advisory.yaml
+        - name: pipelineRunUid
+          value: $(context.pipelineRun.uid)
+        - name: taskGitUrl
+          value: "http://localhost"
+        - name: taskGitRevision
+          value: "main"
+    - name: check-result
+      runAfter:
+        - run-task
+      params:
+        - name: advisory_oci_artifact
+          value: $(tasks.run-task.results.advisory-oci-artifact)
+      taskSpec:
+        params:
+          - name: advisory_oci_artifact
+            type: string
+        steps:
+          - name: check-result
+            image: quay.io/konflux-ci/release-service-utils:26e22ecf2c23e7ec8134fede3b40a6e6aef8ac20
+            script: |
+              #!/usr/bin/env bash
+              set -eux
+
+              echo Test that advisory_url was properly set
+              test -n "$(params.advisory_oci_artifact)"
+  finally:
+    - name: cleanup
+      taskSpec:
+        steps:
+          - name: delete-crs
+            image: quay.io/konflux-ci/release-service-utils:0f82be4be43294b6a96846d87ef7f7c0b9e34267
+            script: |
+              #!/usr/bin/env bash
+              set -eux
+
+              kubectl delete internalrequests --all

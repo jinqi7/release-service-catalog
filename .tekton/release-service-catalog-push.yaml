@@ -25,6 +25,8 @@ spec:
     value: quay.io/redhat-user-workloads/rhtap-release-2-tenant/release-service-catalog:{{revision}}
   - name: dockerfile
     value: Dockerfile
+  - name: skip-checks
+    value: false
   pipelineSpec:
     description: |
       This pipeline is ideal for building container images from a Containerfile while reducing network traffic.

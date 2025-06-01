@@ -1,0 +1,107 @@
+---
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: ReleasePlan
+metadata:
+  labels:
+    release.appstudio.openshift.io/auto-release: 'true'
+    release.appstudio.openshift.io/standing-attribution: 'true'
+    release.appstudio.openshift.io/releasePlanAdmission: "${release_plan_admission_name}"
+  name: ${release_plan_name}
+spec:
+  application: ${application_name}
+  target: ${managed_namespace}
+  data:
+    releaseNotes:
+      type: "RHBA"
+      synopsis: |
+        {%- set product_version_str = advisory.spec.product_version | string() %}
+        {%- set rhel_major_version = product_version_str.split('.')[0] %}
+        {#- This tests for advisory type #}
+        {%- if advisory.spec.type == "RHSA" %}
+        {{ advisory.spec.severity }}: Application Stream container images security update
+        {%- else %}
+        Application Stream container images bug fix and enhancement update
+        {%- endif %}
+      topic: "Updated Application Stream container images for {{ advisory.spec.product_name }} are now available"
+      description: |
+        {#- use advisory product name and local variables #}
+        {{ advisory.spec.product_name }} {{ rhel_major_version }} container images.
+        {#- This tests looping over images in snapshot #}
+        This update includes the following images:
+          {%- if advisory.spec.content.images %}
+            {%- for image in advisory.spec.content.images %}
+              {%- if image.architecture == "amd64" %}
+                {%- set repo_parts =  image.repository.split('/') %}
+          * {{ repo_parts[-1] }}
+              {%- endif %}
+            {%- endfor %}
+          {%- endif %}
+        Security Fix(es):
+          {%- if advisory.spec.content.images %}
+            {%- for image in advisory.spec.content.images %}
+              {%- if image.architecture == "amd64" %}
+                {%- set repo_parts =  image.repository.split('/') %}
+          * {{ repo_parts[-1] }}
+                {%- if image.cves %}
+                  {%- for key, value in image.cves.fixed.items() %}
+            * {{ key }}
+                  {%- endfor %}
+                {%- endif %}
+              {%- endif %}
+            {%- endfor %}
+          {%- endif %}
+          {%- set image_count = advisory.spec.content.images|selectattr('architecture','equalto','amd64')|list|length %}
+          {%- set z_stream = image_count == 1 %}
+          {%- if advisory.spec.issues.fixed %}
+            {#- We purposefully want private images here since that is what our test JIRA is! #}
+            {%- set public_issue_count = advisory.spec.issues.fixed|selectattr('public','equalto',false)|list|length %}
+            {%- if z_stream %}
+              {%- if public_issue_count > 0 %}
+        Bug Fix(es) and Enhancement(s):
+                {%- for jira in advisory.spec.issues.fixed %}
+                  {#- We purposefully want private images here since that is what our test JIRA is! #}
+                  {%- if jira.public == false %}
+          * {{ jira.id }} ({{ jira.summary }})
+                  {%- endif %}
+                {%- endfor %}
+              {%- endif %}
+            {%- endif %}
+          {%- endif %}
+      solution: |
+        The container images provided by this update can be downloaded from the Red Hat container registry
+        at registry.redhat.io using the "podman pull" command. For more information about the image,
+        search the <image_name> in the Red Hat Ecosystem Catalog: https://catalog.redhat.com/software/containers/search.
+      references:
+        - "https://catalog.redhat.com/software/containers/search"
+  tenantPipeline:
+    serviceAccountName: ${tenant_sa_name}
+    pipelineRef:
+      resolver: git
+      params:
+        - name: url
+          value: https://github.com/seanconroy2021/sc-konflux-demos.git
+        - name: revision
+          value: main
+        - name: pathInRepo
+          value: RELEASE-1053/pipeline/pipeline.yaml
+    params:
+      - name: released_version
+        value: 1.2.1
+  collectors:
+    secrets:
+      - jira-collectors-secret-${component_name}
+    items:
+      - name: jira-collector
+        params:
+          - name: url
+            value: https://issues.redhat.com
+          - name: query
+            value: 'project = "Konflux Release"  AND summary ~ "test issue for collector e2e testing"'
+          - name: secretName
+            value: "jira-collectors-secret-${component_name}"
+        timeout: 60
+        type: jira
+      - name: cve
+        params: []
+        type: cve
+    serviceAccountName: ${tenant_sa_name}

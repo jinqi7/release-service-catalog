@@ -2,23 +2,32 @@
 
 Tekton task to populate fields of the releaseNotes  key in the data.json
 file. It will update the data.json in place so that downstream tasks relying on
-the releaseNotes data can use it. Additionally, it outputs a result with the
-path to a file containing data used in component SBOM generation.
+the releaseNotes data can use it.
 
 ## Parameters
 
 | Name                    | Description                                                                                                                | Optional | Default value           |
 |-------------------------|----------------------------------------------------------------------------------------------------------------------------|----------|-------------------------|
 | dataPath                | Path to the JSON string of the merged data to update                                                                       | No       | -                       |
+| contentType             | The contentType of the release artifact. One of [image|binary]                                                             | Yes      | image                   |
 | snapshotPath            | Path to the JSON string of the mapped Snapshot in the data workspace                                                       | No       | -                       |
 | ociStorage              | The OCI repository where the Trusted Artifacts are stored                                                                  | Yes      | empty                   |
 | ociArtifactExpiresAfter | Expiration date for the trusted artifacts created in the OCI repository. An empty string means the artifacts do not expire | Yes      | 1d                      |
 | trustedArtifactsDebug   | Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable                                     | Yes      | ""                      |
-| orasOptions             | oras options to pass to Trusted Artifacts calls                                                                            | Yes      | ""                      | 
+| orasOptions             | oras options to pass to Trusted Artifacts calls                                                                            | Yes      | ""                      |
 | sourceDataArtifact      | Location of trusted artifacts to be used to populate data directory                                                        | Yes      | ""                      |
 | dataDir                 | The location where data will be stored                                                                                     | Yes      | $(workspaces.data.path) |
 | taskGitUrl              | The url to the git repo where the release-service-catalog tasks and stepactions to be used are stored                      | No       | ""                      |
 | taskGitRevision         | The revision in the taskGitUrl repo to be used                                                                             | No       | ""                      |
+
+## Changes in 5.0.0
+* This task no longer generates data for SBOM purposes.
+  * The `sbomDataPath` result is removed.
+
+## Changes in 4.1.0
+* This task takes a new optional parameter 'contentType'
+  * defaults to 'images' to remain backward compatible
+* Conditionally runs steps based on content type
 
 ## Changes in 4.0.0
 * This task now supports Trusted artifacts

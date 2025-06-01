@@ -2,10 +2,11 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: test-create-product-sbom-multiple-purls
+  name: test-populate-release-notes-cves-artifacts
 spec:
   description: |
-    Create a product-level SBOM where components can contain multiple purls.
+    Run the populate-release-notes task and ensure CVE information present in the data.json
+    is properly included in the releaseNotes.content.artifacts.
   workspaces:
     - name: tests-workspace
   params:
@@ -55,35 +56,108 @@ spec:
               value: "$(params.trustedArtifactsDebug)"
         steps:
           - name: setup
-            image: quay.io/konflux-ci/release-service-utils:3a1280476a414c7a1538b2db846bcd1fb59176fd
+            image: quay.io/konflux-ci/release-service-utils:e85ceb962ee6f4d0672b4aa4e9946621ab302f20
             script: |
               #!/usr/bin/env sh
               set -eux
 
               mkdir -p "$(params.dataDir)/$(context.pipelineRun.uid)"
-              cat > "$(params.dataDir)/$(context.pipelineRun.uid)"/data.json << EOF
+              cat > "$(params.dataDir)/$(context.pipelineRun.uid)/data.json" << EOF
               {
+                "mapping": {
+                  "components": [
+                    {
+                      "name": "releng-test-product-binaries",
+                      "files": [
+                        {
+                          "name": "releng-test-product-binaries-windows-amd64.gz",
+                          "arch": "amd64",
+                          "os": "windows"
+                        },
+                        {
+                          "name": "releng-test-product-binaries-linux-amd64.gz",
+                          "arch": "amd64",
+                          "os": "linux"
+                        }
+                      ],
+                      "contentGateway": {
+                        "productName": "Releng Test Product",
+                        "productCode": "RelengTestProduct",
+                        "productVersionName": "1.5.0",
+                        "filePrefix": "releng-test-product-binaries"
+                      }
+                    }
+                  ]
+                },
                 "releaseNotes": {
-                  "product_name": "Red Hat Openstack Product",
+                   "cves": [
+                    {
+                      "component": "releng-test-product-binaries",
+                      "packages": [
+                        "pkg1",
+                        "pkg2"
+                      ],
+                      "key": "CVE-123",
+                      "summary": "",
+                      "uploadDate": "01-01-1980",
+                      "url": ""
+                    },
+                    {
+                      "component": "releng-test-product-binaries",
+                      "packages": [
+                        "pkg3"
+                      ],
+                      "key": "CVE-456",
+                      "summary": "",
+                      "uploadDate": "01-01-1980",
+                      "url": ""
+                    }
+                  ],
+                  "product_id": [
+                    123
+                  ],
+                  "product_name": "Releng Test Product",
                   "product_version": "123",
                   "cpe": "cpe:/a:example:openstack:el8",
-                  "content": {
-                    "images": [
+                  "type": "RHSA",
+                  "issues": {
+                    "fixed": [
                       {
-                        "component": "test-component-1",
-                        "purl": "test-component-1-purl-1"
+                        "id": "RHOSP-12345",
+                        "source": "issues.example.com"
                       },
                       {
-                        "component": "test-component-1",
-                        "purl": "test-component-1-purl-2"
-                      },
-                      {
-                        "component": "test-component-2",
-                        "purl": "test-component-2-purl-1"
+                        "id": 1234567,
+                        "source": "bugzilla.example.com"
                       }
                     ]
-                  }
+                  },
+                  "synopsis": "test synopsis",
+                  "topic": "test topic",
+                  "description": "test description",
+                  "solution": "test solution",
+                  "references": [
+                    "https://docs.example.com/some/example/release-notes"
+                  ]
                 }
+              }
+              EOF
+
+              cat > "$(params.dataDir)/$(context.pipelineRun.uid)/snapshot.json" << EOF
+              {
+                "application": "myapp",
+                "components": [
+                  {
+                    "name": "releng-test-product-binaries",
+                    "containerImage": "registry.io/image@sha256:123456",
+                    "repository": "quay.io/redhat-prod/product----repo",
+                    "rh-registry-repo": "registry.redhat.io/product/repo",
+                    "tags": [
+                      "foo",
+                      "bar"
+                    ]
+                  }
+                ]
               }
               EOF
           - name: skip-trusted-artifact-operations
@@ -114,10 +188,12 @@ spec:
                 value: $(results.sourceDataArtifact.path)
     - name: run-task
       taskRef:
-        name: create-product-sbom
+        name: populate-release-notes
       params:
-        - name: dataJsonPath
+        - name: dataPath
           value: "$(context.pipelineRun.uid)/data.json"
+        - name: snapshotPath
+          value: "$(context.pipelineRun.uid)/snapshot.json"
         - name: ociStorage
           value: $(params.ociStorage)
         - name: orasOptions
@@ -132,26 +208,24 @@ spec:
           value: "http://localhost"
         - name: taskGitRevision
           value: "main"
+        - name: contentType
+          value: "binary"
       workspaces:
         - name: data
           workspace: tests-workspace
       runAfter:
         - setup
     - name: check-result
-      workspaces:
-        - name: data
-          workspace: tests-workspace
       params:
-        - name: sbomDir
-          value: $(tasks.run-task.results.productSBOMPath)
         - name: sourceDataArtifact
           value: "$(tasks.run-task.results.sourceDataArtifact)=$(params.dataDir)"
         - name: dataDir
-          value: "$(params.dataDir)"
+          value: $(params.dataDir)
+      workspaces:
+        - name: data
+          workspace: tests-workspace
       taskSpec:
         params:
-          - name: sbomDir
-            type: string
           - name: sourceDataArtifact
             type: string
           - name: dataDir
@@ -190,45 +264,22 @@ spec:
               - name: sourceDataArtifact
                 value: $(params.sourceDataArtifact)
           - name: check-result
-            image: quay.io/konflux-ci/release-service-utils:3a1280476a414c7a1538b2db846bcd1fb59176fd
+            image: quay.io/konflux-ci/release-service-utils:e85ceb962ee6f4d0672b4aa4e9946621ab302f20
             script: |
               #!/usr/bin/env bash
               set -eux
+              DATA_FILE="$(params.dataDir)/$(context.pipelineRun.uid)/data.json"
+              # Ensure 'arch' and 'os' are present in the artifact entry
+              test "$(jq -e '.releaseNotes.content.artifacts[0] | has("architecture")' "$DATA_FILE")" == "true"
+              test "$(jq -e '.releaseNotes.content.artifacts[0] | has("os")' "$DATA_FILE")" == "true"
 
-              cp "$(params.dataDir)/$(params.sbomDir)/Red-Hat-Openstack-Product-123.json" sbom.json
-
-              test "$(jq -r '.name' sbom.json)" == "Red Hat Openstack Product 123"
-
-              # Check product SPDX package and relationship
-              test "$(jq -r '.packages[0].SPDXID' sbom.json)" == "SPDXRef-product"
-              test "$(jq -r '.packages[0].name' sbom.json)" == "Red Hat Openstack Product"
-              test "$(jq -r '.packages[0].versionInfo' sbom.json)" == "123"
-              test "$(jq -r '.packages[0].externalRefs[0].referenceLocator' sbom.json)" == \
-                "cpe:/a:example:openstack:el8"
-
-              test "$(jq -r '.relationships[0].relationshipType' sbom.json)" == "DESCRIBES"
-              test "$(jq -r '.relationships[0].relatedSpdxElement' sbom.json)" == "SPDXRef-product"
-
-              # Check component SPDX packages and relationships
-              # Component 1
-              test "$(jq -r '.packages[1].name' sbom.json)" == "test-component-1"
-              test "$(jq -r '.packages[1].externalRefs[0].referenceLocator' sbom.json)" == \
-                "test-component-1-purl-1"
-              test "$(jq -r '.packages[1].externalRefs[1].referenceLocator' sbom.json)" == \
-                "test-component-1-purl-2"
-
-              test "$(jq -r '.relationships[1].relationshipType' sbom.json)" == "PACKAGE_OF"
-              test "$(jq -r '.relationships[1].spdxElementId' sbom.json)" == "SPDXRef-component-0"
-
-              # Component 2
-              test "$(jq -r '.packages[2].name' sbom.json)" == "test-component-2"
-              test "$(jq -r '.packages[2].externalRefs[0].referenceLocator' sbom.json)" == \
-                "test-component-2-purl-1"
-
-              test "$(jq -r '.relationships[2].relationshipType' sbom.json)" == "PACKAGE_OF"
-              test "$(jq -r '.relationships[2].spdxElementId' sbom.json)" == "SPDXRef-component-1"
-
-              test "$(jq -r '.packages | length' sbom.json)" == 3
-              test "$(jq -r '.relationships | length' sbom.json)" == 3
+              # The CVEs should be present in the comp artifacts section
+              test "$(jq '.releaseNotes.content.artifacts[0].cves.fixed | length' \
+                "$DATA_FILE")" \
+                == 2
+              test "$(jq -jr '.releaseNotes.content.artifacts[0].cves.fixed | keys[]' \
+                "$DATA_FILE")" == "CVE-123CVE-456"
+              test "$(jq '.releaseNotes.content.artifacts[0].cves.fixed."CVE-123".packages | length' \
+                "$DATA_FILE")" == 2
       runAfter:
         - run-task
