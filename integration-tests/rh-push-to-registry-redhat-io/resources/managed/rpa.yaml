@@ -1,0 +1,50 @@
+---
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: ReleasePlanAdmission
+metadata:
+  name: ${release_plan_admission_name}
+  labels:
+    originating-tool: "${originating_tool}"
+spec:
+  applications:
+    - ${application_name}
+  data:
+    pyxis:
+      server: stage
+      secret: pyxis-${component_name}
+      skipLayers: true
+    sign:
+      configMapName: "hacbs-signing-pipeline-config-redhatbeta2"
+      cosignSecretName: "konflux-cosign-signing-stage-${component_name}"
+    fileUpdates:
+      - repo: 'https://gitlab.cee.redhat.com/hacbs-release-tests/app-interface/'
+        upstream_repo: 'https://gitlab.cee.redhat.com/hacbs-release-tests/app-interface/'
+        ref: master
+        paths:
+          - path: data/app-interface/app-interface-settings.yml
+            replacements:
+              - key: .description
+                replacement: >-
+                  |description:.*|description: {{ .components[0].containerImage }}|
+    mapping:
+      components:
+        - name: ${component_name}
+          repository: registry.stage.redhat.io/rhtap/konflux-release-e2e
+          tags:
+            - '{{ git_short_sha }}'
+  origin: ${tenant_namespace}
+  pipeline:
+    pipelineRef:
+      params:
+        - name: url
+          value: "${RELEASE_CATALOG_GIT_URL}"
+        - name: revision
+          value: "${RELEASE_CATALOG_GIT_REVISION}"
+        - name: pathInRepo
+          value: pipelines/managed/rh-push-to-registry-redhat-io/rh-push-to-registry-redhat-io.yaml
+      resolver: git
+    serviceAccountName: ${managed_sa_name}
+    timeouts:
+      pipeline: 4h0m0s
+      tasks: 4h0m0s
+  policy: standard-${component_name}
