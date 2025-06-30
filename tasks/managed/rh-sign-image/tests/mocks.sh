@@ -14,7 +14,7 @@ function internal-pipelinerun() {
   # get the name to patch it. We do this by tacking on another random label that we can use
   # to select with later.
   rando=$(openssl rand -hex 12)
-  /home/utils/internal-pipelinerun $@ -l "internal-services.appstudio.openshift.io/test-id=$rando" &
+  /home/utils/internal-pipelinerun "$@" -l "internal-services.appstudio.openshift.io/test-id=$rando" &
 
   sleep 2
   NAME=
@@ -37,9 +37,9 @@ function internal-pipelinerun() {
   done
   echo "PLR Name: $NAME"
 
-  if [[ "$*" == *"requester=testuser-failure"* ]]; then
+  if [[ "$*" == *"expected-ir-failure"* ]]; then
       set_plr_status $NAME Failure 5
-  elif [[ "$*" == *"requester=testuser-timeout"* ]]; then
+  elif [[ "$*" == *"expected-timeout-failure"* ]]; then
       echo "skipping setting PLR status since we want a timeout..."
   else
       set_plr_status $NAME Succeeded 5
@@ -88,7 +88,7 @@ function internal-request() {
   # get the name to patch it. We do this by tacking on another random label that we can use
   # to select with later.
   rando=$(openssl rand -hex 12)
-  /home/utils/internal-request $@ -l "internal-services.appstudio.openshift.io/test-id=$rando" &
+  /home/utils/internal-request "$@" -l "internal-services.appstudio.openshift.io/test-id=$rando" &
 
   sleep 2
   NAME=
@@ -111,9 +111,9 @@ function internal-request() {
   done
   echo "IR Name: $NAME"
 
-  if [[ "$*" == *"requester=testuser-failure"* ]]; then
+  if [[ "$*" == *"expected-ir-failure"* ]]; then
       set_ir_status $NAME Failure 5
-  elif [[ "$*" == *"requester=testuser-timeout"* ]]; then
+  elif [[ "$*" == *"expected-timeout-failure"* ]]; then
       echo "skipping setting IR status since we want a timeout..."
   else
       set_ir_status $NAME Succeeded 5
@@ -154,13 +154,13 @@ EOF
 function skopeo() {
   echo $* >> $(params.dataDir)/mock_skopeo.txt
   echo Mock skopeo called with: $*  >> /dev/stderr
-  if [[ "$*" == "inspect --raw docker://"* ]] || [[ "$*" == "inspect --no-tags --override-os linux --override-arch "*" docker://"* ]]
+  if [[ "$*" == "inspect --retry-times 3 --raw docker://"* ]] || [[ "$*" == "inspect --no-tags --override-os linux --override-arch "*" docker://"* ]]
   then
     echo '{"mediaType": "my_media_type"}'
   else
-    if [[ "$*" != "inspect --no-tags docker://"* ]]
+    if [[ "$*" != "inspect --retry-times 3 --no-tags docker://"* ]]
     then
-      if [[ "$*" == "inspect --no-tags --raw docker://registry.io/multi-arch-image0"* ]]
+      if [[ "$*" == "inspect --retry-times 3 --no-tags --raw docker://registry.io/multi-arch-image0"* ]]
       then
         echo '{
                 "schemaVersion": 2,
@@ -188,7 +188,7 @@ function skopeo() {
               }
             '
       else
-        if [[ "$*" == "inspect --no-tags --raw docker://registry.io/image"* ]]
+        if [[ "$*" == "inspect --retry-times 3 --no-tags --raw docker://registry.io/image"* ]]
         then
           echo '{
                   "schemaVersion": 2,

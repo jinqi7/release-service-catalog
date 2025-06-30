@@ -7,14 +7,51 @@ spec:
   description: Test creating a internal request to publish an image
   workspaces:
     - name: tests-workspace
+  params:
+    - name: ociStorage
+      description: The OCI repository where the Trusted Artifacts are stored.
+      type: string
+    - name: ociArtifactExpiresAfter
+      description: Expiration date for the trusted artifacts created in the
+        OCI repository. An empty string means the artifacts do not expire.
+      type: string
+      default: "1d"
+    - name: orasOptions
+      description: oras options to pass to Trusted Artifacts calls
+      type: string
+      default: "--insecure"
+    - name: trustedArtifactsDebug
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      type: string
+      default: ""
+    - name: dataDir
+      description: The location where data will be stored
+      type: string
   tasks:
     - name: setup
       workspaces:
         - name: data
           workspace: tests-workspace
       taskSpec:
+        results:
+          - name: sourceDataArtifact
+            type: string
         workspaces:
           - name: data
+        volumes:
+          - name: workdir
+            emptyDir: {}
+        stepTemplate:
+          volumeMounts:
+            - mountPath: /var/workdir
+              name: workdir
+          env:
+            - name: IMAGE_EXPIRES_AFTER
+              value: $(params.ociArtifactExpiresAfter)
+            - name: "ORAS_OPTIONS"
+              value: "$(params.orasOptions)"
+            - name: "DEBUG"
+              value: "$(params.trustedArtifactsDebug)"
         steps:
           - name: setup-values
             image: quay.io/konflux-ci/release-service-utils:0f82be4be43294b6a96846d87ef7f7c0b9e34267
@@ -22,13 +59,62 @@ spec:
               #!/usr/bin/env sh
               set -eux
 
-              cat > "$(workspaces.data.path)"/data.json << EOF
+              mkdir -p "$(params.dataDir)/$(context.pipelineRun.uid)"
+              cat > "$(params.dataDir)/$(context.pipelineRun.uid)/data.json" << EOF
               {
                 "fbc": {
                   "publishingCredentials": "test-credentials"
                 }
               }
               EOF
+              cat > "$(params.dataDir)/internal-requests-results.json" << EOF
+              {
+                "index_image": {
+                  "target_index": "quay.io/scoheb/fbc-target-index-testing:v4.12"
+                },
+                "components": [
+                  {
+                    "fbc_fragment": "registry.io/image0@sha256:0000",
+                    "target_index": "quay.io/scoheb/fbc-target-index-testing:v4.12",
+                    "ocp_version": "v4.12",
+                    "index_image": "redhat.com/rh-stage/iib:01",
+                    "index_image_resolved": "redhat.com/rh-stage/iib@sha256:abcdefghijk",
+                    "image_digests": [
+                      "quay.io/a",
+                      "quay.io/b"
+                    ],
+                    "completion_time": "2023-03-06T16:39:11.314092Z",
+                    "iibLog": "Dummy IIB Log"
+                  }
+                ]
+              }
+              EOF
+          - name: skip-trusted-artifact-operations
+            ref:
+              name: skip-trusted-artifact-operations
+            params:
+              - name: ociStorage
+                value: $(params.ociStorage)
+              - name: workDir
+                value: $(params.dataDir)
+          - name: create-trusted-artifact
+            ref:
+              name: create-trusted-artifact
+            params:
+              - name: ociStorage
+                value: $(params.ociStorage)
+              - name: workDir
+                value: $(params.dataDir)
+              - name: sourceDataArtifact
+                value: $(results.sourceDataArtifact.path)
+          - name: patch-source-data-artifact-result
+            ref:
+              name: patch-source-data-artifact-result
+            params:
+              - name: ociStorage
+                value: $(params.ociStorage)
+              - name: sourceDataArtifact
+                value: $(results.sourceDataArtifact.path)
     - name: run-task
       taskRef:
         name: publish-index-image
@@ -39,27 +125,83 @@ spec:
           value: "quay.io/test/targetIndex:tag"
         - name: buildTimestamp
           value: 11111111111
+        - name: internalRequestResultsFile
+          value: "internal-requests-results.json"
         - name: retries
           value: 2
         - name: pipelineRunUid
           value: $(context.pipelineRun.uid)
         - name: dataPath
-          value: data.json
+          value: $(context.pipelineRun.uid)/data.json
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: orasOptions
+          value: $(params.orasOptions)
+        - name: sourceDataArtifact
+          value: "$(tasks.setup.results.sourceDataArtifact)=$(params.dataDir)"
+        - name: dataDir
+          value: $(params.dataDir)
+        - name: trustedArtifactsDebug
+          value: $(params.trustedArtifactsDebug)
         - name: taskGitUrl
           value: "http://localhost"
         - name: taskGitRevision
           value: "main"
+      runAfter:
+        - setup
       workspaces:
         - name: data
           workspace: tests-workspace
-      runAfter:
-        - setup
     - name: check-result
       workspaces:
         - name: data
           workspace: tests-workspace
+      params:
+        - name: sourceDataArtifact
+          value: "$(tasks.run-task.results.sourceDataArtifact)=$(params.dataDir)"
+        - name: dataDir
+          value: $(params.dataDir)
+      runAfter:
+        - run-task
       taskSpec:
+        workspaces:
+          - name: data
+        params:
+          - name: sourceDataArtifact
+            type: string
+          - name: dataDir
+            type: string
+        volumes:
+          - name: workdir
+            emptyDir: {}
+        stepTemplate:
+          volumeMounts:
+            - mountPath: /var/workdir
+              name: workdir
+          env:
+            - name: IMAGE_EXPIRES_AFTER
+              value: $(params.ociArtifactExpiresAfter)
+            - name: "ORAS_OPTIONS"
+              value: "$(params.orasOptions)"
+            - name: "DEBUG"
+              value: "$(params.trustedArtifactsDebug)"
         steps:
+          - name: skip-trusted-artifact-operations
+            ref:
+              name: skip-trusted-artifact-operations
+            params:
+              - name: ociStorage
+                value: $(params.ociStorage)
+              - name: workDir
+                value: $(params.dataDir)
+          - name: use-trusted-artifact
+            ref:
+              name: use-trusted-artifact
+            params:
+              - name: workDir
+                value: $(params.dataDir)
+              - name: sourceDataArtifact
+                value: $(params.sourceDataArtifact)
           - name: check-result
             image: quay.io/konflux-ci/release-service-utils:0f82be4be43294b6a96846d87ef7f7c0b9e34267
             script: |
@@ -90,19 +232,20 @@ spec:
                     exit 1
                   fi
 
-                  if [ "$(jq -r '.sourceIndex' <<< "${params}")" != "quay.io/test/sourceIndex:tag" ]; then
+                  if [ "$(jq -r '.sourceIndex' <<< "${params}")" != "redhat.com/rh-stage/iib@sha256:abcdefghijk" ]; then
                     echo "sourceIndex image does not match"
                     exit 1
                   fi
 
                   targetIndex=$(jq -r '.targetIndex' <<< "${params}")
                   if [ $i = 0 ]; then
-                      if [ "$targetIndex" != "quay.io/test/targetIndex:tag" ]; then
+                      if [ "$targetIndex" != "quay.io/scoheb/fbc-target-index-testing:v4.12" ]; then
                         echo "targetIndex image does not match"
                         exit 1
                       fi
                   else
-                      if [ "$targetIndex" != "quay.io/test/targetIndex:tag-11111111111" ]; then
+                      expectedTargetIndex="quay.io/scoheb/fbc-target-index-testing:v4.12-2023-03-06T16:39:11.314092Z"
+                      if [ "$targetIndex" != "$expectedTargetIndex" ]; then
                         echo "targetIndex image does not match"
                         exit 1
                       fi
@@ -118,8 +261,6 @@ spec:
                     exit 1 
                   fi
               done
-      runAfter:
-        - run-task
   finally:
     - name: cleanup
       taskSpec:

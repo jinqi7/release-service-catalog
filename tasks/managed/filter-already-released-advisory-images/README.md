@@ -1,10 +1,10 @@
 # Filter Already Released Advisory Images
 
-This task filters out images from a snapshot that have already been published in advisories.  
+This task filters out images from a snapshot that have already been published in advisories.
 It is a **managed Tekton task** that triggers an **internal task** using an InternalRequest,
 and overwrites the mapped snapshot file with a filtered version containing only **unpublished images**.
 
-The task also outputs a `skip_release` result, which is set to `true` 
+The task also outputs a `skip_release` result, which is set to `true`
 if all components are already released (and the pipeline can be skipped), or `false` otherwise.
 
 The task overwrites the original mapped snapshot file in place with a filtered version containing only unpublished images. Downstream tasks continue to use the same snapshot path.

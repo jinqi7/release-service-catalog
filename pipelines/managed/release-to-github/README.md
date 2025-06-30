@@ -13,75 +13,14 @@ Tekton release pipeline to release binaries extracted from the image built with 
 | snapshot                        | The namespaced name (namespace/name) of the snapshot                                                                               | No       | -                                                         |
 | enterpriseContractPolicy        | JSON representation of the policy to be applied when validating the enterprise contract                                            | No       | -                                                         |
 | enterpriseContractExtraRuleData | Extra rule data to be merged into the policy specified in params.enterpriseContractPolicy. Use syntax "key1=value1,key2=value2..." | Yes      | pipeline_intention=release                                | 
-| enterpriseContractTimeout       | Timeout setting for `ec validate`                                                                                                  | Yes      | 40m0s                                                     |
+| enterpriseContractTimeout       | Timeout setting for `ec validate`                                                                                                  | Yes      | 8h0m0s                                                    |
+| enterpriseContractWorkerCount   | Number of parallel workers to use for policy evaluation.                                                                           | Yes      | 4                                                         |
 | postCleanUp                     | Cleans up workspace after finishing executing the pipeline                                                                         | Yes      | true                                                      |
 | verify_ec_task_bundle           | The location of the bundle containing the verify-enterprise-contract task                                                          | No       | -                                                         | 
 | verify_ec_task_git_revision     | The git revision to be used when consuming the verify-conforma task                                                                | No       | -                                                         |
 | taskGitUrl                      | The url to the git repo where the release-service-catalog tasks to be used are stored                                              | Yes      | https://github.com/konflux-ci/release-service-catalog.git |
 | taskGitRevision                 | The revision in the taskGitUrl repo to be used                                                                                     | No       | -                                                         |
-
-## Changes in 4.5.0
-* The `sign-base64-blob` task is now passed the `taskGitUrl` and `taskGitRevision` parameters
-  * They are required by the task now
-
-## Changes in 4.4.0
-* Update all tasks that now support trusted artifacts to specify the taskGit* parameters for the step action resolvers
-
-## Changes in 4.3.0
-* Add new parameter `verify_ec_task_git_revision` needed for consuming the verify-conforma task
-  via git resolver
-
-## Changes in 4.2.0
-* Update all task pathInRepo values as they are now in `tasks/managed`
-
-## Changes in 4.1.0
-* Add the `check-data-keys` task to validate the `data.json` file using the JSON schema.
-
-## Changes in 4.0.0
-* Drop the `enterpriseContractPublicKey` param. The verify task will take the value from the policy.
-
-## Changes in 3.6.0
-* Add `requireInternalServices` parameter to the 'verify-access-to-resources' task.
-
-## Changes in 3.5.2
-* Increase `enterpriseContractTimeout` parameter default value.
-
-## Changes in 3.5.1
-* Add `enterpriseContractTimeout` parameter.
-
-## Changes in 3.5.0
-* Removed `verify-access-to-resources` script and replaced it with a task.
-
-## Changes in 3.4.0
-- Add the task `update-cr-status` at the end of the pipeline to save all pipeline results
-
-## Changes in 3.3.0
-* The create-github-release task now gets the `resultsDir` parameter from the collect-data results
-
-## Changes in 3.2.0
-* `enterpriseContractExtraRuleData` added as a pipeline parameter, which is
-  then passed to EC. Allows for easier runtime changes to rule data.
-
-## Changes in 3.1.0
-* update the taskGitUrl default value due to migration
-  to konflux-ci GitHub org
-
-## Changes in 3.0.0
-* releaseServiceConfig added as a pipeline parameter that is passed to the collect-data task
-
-## Changes in 2.0.0
-* Parameters supplied by the Release Service operator now use camelCase format
-
-## Changes in 1.2.0
-* Modified the pipeline to dynamically source the `snapshot_spec.json`
-  file from the results of the `collect-data` task.
-
-## Changes in 1.1.1
-* Tasks that interact with InternalRequests now have a pipelineRunUid parameter added to them to help with cleanup
-
-## Changes in 1.1.0
-* taskGitRevision no longer has a default. It will be provided by the operator and will always have the same value as
-  the git revision in the PipelineRef definition of the PipelineRun if using a git resolver. See RHTAPREL-790 for details
-
-## Changes in 1.0.1
-* Fixed bug where pipeline execution didn't wait for verify-enterprise-contract task to succeed
+| ociStorage                      | The OCI repository where the Trusted Artifacts are stored                                                                          | Yes      | quay.io/konflux-ci/release-service-trusted-artifacts      |
+| orasOptions                     | oras options to pass to Trusted Artifacts calls                                                                                    | Yes      | ""                                                        |
+| trustedArtifactsDebug           | Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable                                             | Yes      | ""                                                        |
+| dataDir                         | The location where data will be stored                                                                                             | Yes      | /var/workdir/release                                      |

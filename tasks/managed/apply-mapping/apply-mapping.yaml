@@ -3,8 +3,6 @@ apiVersion: tekton.dev/v1
 kind: Task
 metadata:
   name: apply-mapping
-  labels:
-    app.kubernetes.io/version: "2.1.0"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
@@ -79,6 +77,12 @@ spec:
         value: "$(params.trustedArtifactsDebug)"
   steps:
     - name: skip-trusted-artifact-operations
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 20m
       ref:
         resolver: "git"
         params:
@@ -94,6 +98,12 @@ spec:
         - name: workDir
           value: $(params.dataDir)
     - name: use-trusted-artifact
+      computeResources:
+        limits:
+          memory: 64Mi
+        requests:
+          memory: 64Mi
+          cpu: 30m
       ref:
         resolver: "git"
         params:
@@ -152,7 +162,7 @@ spec:
             local repo="$2"
 
             # Use `skopeo list-tags` to fetch all tags from the repository
-            existing_tags=$(skopeo list-tags docker://"${repo}" | jq -r '.Tags[]')
+            existing_tags=$(skopeo list-tags --retry-times 3 docker://"${repo}" | jq -r '.Tags[]')
 
             # Remove `{{ incrementer }}` placeholder to get the version prefix for regex pattern
             # shellcheck disable=SC2001
@@ -360,7 +370,7 @@ spec:
             # tags per arch. So, we just use the first digest listed.
             arch="$(jq -rs 'map(.platform.architecture) | .[0]' <<< "$arch_json")"
             os="$(jq -rs 'map(.platform.os) | .[0]' <<< "$arch_json")"
-            image_metadata="$(skopeo inspect --no-tags --override-os "${os}" --override-arch "${arch}" \
+            image_metadata="$(skopeo inspect --retry-times 3 --no-tags --override-os "${os}" --override-arch "${arch}" \
               docker://"${IMAGE_REF}" | jq -c)"
             # For timestamp, use Labels.build-date and fallback to Created
             build_date="$(jq -r '.Labels."build-date" // .Created // ""' <<< "$image_metadata")"
@@ -438,6 +448,12 @@ spec:
             fi
         done
     - name: create-trusted-artifact
+      computeResources:
+        limits:
+          memory: 128Mi
+        requests:
+          memory: 128Mi
+          cpu: 250m
       ref:
         resolver: "git"
         params:
@@ -455,6 +471,12 @@ spec:
         - name: sourceDataArtifact
           value: $(results.sourceDataArtifact.path)
     - name: patch-source-data-artifact-result
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 20m
       ref:
         resolver: "git"
         params:

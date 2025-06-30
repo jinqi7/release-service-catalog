@@ -2,8 +2,6 @@
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
-  labels:
-    app.kubernetes.io/version: "1.3.0"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: "release"
@@ -32,6 +30,47 @@ spec:
     - name: sharedSecret
       default: infra-deployments-pr-creator
       description: secret in the namespace which contains private key for the GitHub App
+    - name: ociStorage
+      description: The OCI repository where the Trusted Artifacts are stored.
+      type: string
+      default: "empty"
+    - name: ociArtifactExpiresAfter
+      description: Expiration date for the trusted artifacts created in the
+        OCI repository. An empty string means the artifacts do not expire
+      type: string
+      default: "1d"
+    - name: trustedArtifactsDebug
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      type: string
+      default: ""
+    - name: orasOptions
+      description: oras options to pass to Trusted Artifacts calls
+      type: string
+      default: ""
+    - name: sourceDataArtifact
+      type: string
+      description: Location of trusted artifacts to be used to populate data directory
+      default: ""
+    - name: dataDir
+      description: The location where data will be stored
+      type: string
+      default: $(workspaces.data.path)
+    - name: taskGitUrl
+      type: string
+      description: The url to the git repo where the release-service-catalog tasks and stepactions to be used are stored
+    - name: taskGitRevision
+      type: string
+      description: The revision in the taskGitUrl repo to be used
+  workspaces:
+    - name: artifacts
+      description: Workspace containing arbitrary artifacts used during the task run.
+      optional: true
+    - name: data
+      description: The workspace where the snapshot spec json file resides
+  results:
+    - name: sourceDataArtifact
+      type: string
+      description: Produced trusted data artifact
   volumes:
     - name: infra-deployments-pr-creator
       secret:
@@ -39,19 +78,87 @@ spec:
         secretName: $(params.sharedSecret)
     - name: shared-dir
       emptyDir: {}
+    - name: workdir
+      emptyDir: {}
+  stepTemplate:
+    volumeMounts:
+      - mountPath: /var/workdir
+        name: workdir
+    env:
+      - name: IMAGE_EXPIRES_AFTER
+        value: $(params.ociArtifactExpiresAfter)
+      - name: "ORAS_OPTIONS"
+        value: "$(params.orasOptions)"
+      - name: "DEBUG"
+        value: "$(params.trustedArtifactsDebug)"
   steps:
+    - name: skip-trusted-artifact-operations
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 20m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/skip-trusted-artifact-operations/skip-trusted-artifact-operations.yaml
+      params:
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: workDir
+          value: $(params.dataDir)
+    - name: use-trusted-artifact
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 20m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/use-trusted-artifact/use-trusted-artifact.yaml
+      params:
+        - name: workDir
+          value: $(params.dataDir)
+        - name: sourceDataArtifact
+          value: $(params.sourceDataArtifact)
     - name: git-clone-infra-deployments
       image: quay.io/konflux-ci/release-service-utils:0077f4af29bb55cb80fcce770dd32f2e7bba97d7
+      computeResources:
+        limits:
+          memory: 256Mi
+        requests:
+          memory: 256Mi
+          cpu: 150m
       volumeMounts:
         - name: shared-dir
           mountPath: /shared
       workingDir: /shared
       script: |
-        TARGET_GH_REPO="$(jq -r '.targetGHRepo // "$(params.defaultTargetGHRepo)"' "$(params.dataJsonPath)")"
+        TARGET_GH_REPO="$(jq -r '.targetGHRepo // "$(params.defaultTargetGHRepo)"' \
+          "$(params.dataDir)/$(params.dataJsonPath)")"
         echo "Cloning $TARGET_GH_REPO"
         git clone "https://github.com/${TARGET_GH_REPO}.git" cloned
     - name: run-update-script
       image: quay.io/konflux-ci/release-service-utils:0077f4af29bb55cb80fcce770dd32f2e7bba97d7
+      computeResources:
+        limits:
+          memory: 128Mi
+        requests:
+          memory: 128Mi
+          cpu: 100m
       volumeMounts:
         - name: shared-dir
           mountPath: /shared
@@ -62,21 +169,21 @@ spec:
         cd cloned
         
         echo "snapshot:"
-        cat "$(params.snapshotPath)"
+        cat "$(params.dataDir)/$(params.snapshotPath)"
         echo ""
         
         # We assume we only have one component in the service.
-        revision="$(jq -r .components[0].source.git.revision "$(params.snapshotPath)")"
+        revision="$(jq -r .components[0].source.git.revision "$(params.dataDir)/$(params.snapshotPath)")"
         echo "revision: $revision"
         echo "$revision" > ../revision.txt
 
-        originRepo="$(jq -r .components[0].source.git.url "$(params.snapshotPath)")"
+        originRepo="$(jq -r .components[0].source.git.url "$(params.dataDir)/$(params.snapshotPath)")"
         echo "origin repo: $originRepo"
         echo "$originRepo" > ../originRepo.txt
 
         # Get SCRIPT from Data
-        echo "data: $(params.dataJsonPath)"
-        SCRIPT="$(jq -r '."infra-deployment-update-script" // empty' "$(params.dataJsonPath)")"
+        echo "data: $(params.dataDir)/$(params.dataJsonPath)"
+        SCRIPT="$(jq -r '."infra-deployment-update-script" // empty' "$(params.dataDir)/$(params.dataJsonPath)")"
 
         if [ "${SCRIPT}" == "" ] ; then
           echo "No script provided via 'infra-deployment-update-script' key in data"
@@ -91,6 +198,12 @@ spec:
         echo "$PATCHED_SCRIPT" | sh
     - name: get-diff-files
       image: quay.io/konflux-ci/release-service-utils:0077f4af29bb55cb80fcce770dd32f2e7bba97d7
+      computeResources:
+        limits:
+          memory: 128Mi
+        requests:
+          memory: 128Mi
+          cpu: 100m
       volumeMounts:
         - name: shared-dir
           mountPath: /shared
@@ -101,6 +214,12 @@ spec:
     # Based on https://github.com/tektoncd/catalog/tree/main/task/github-app-token/0.2/
     - name: create-pr
       image: quay.io/konflux-ci/release-service-utils:0077f4af29bb55cb80fcce770dd32f2e7bba97d7
+      computeResources:
+        limits:
+          memory: 512Mi
+        requests:
+          memory: 512Mi
+          cpu: 350m
       volumeMounts:
         - name: infra-deployments-pr-creator
           mountPath: /secrets/deploy-key
@@ -113,7 +232,7 @@ spec:
         - name: GITHUB_API_URL
           value: https://api.github.com
         - name: DATA_JSON_PATH
-          value: "$(params.dataJsonPath)"
+          value: "$(params.dataDir)/$(params.dataJsonPath)"
         - name: DEFAULT_TARGET_GH_REPO
           value: "$(params.defaultTargetGHRepo)"
         - name: DEFAULT_GITHUB_APP_ID
@@ -352,10 +471,47 @@ spec:
 
         if __name__ == '__main__':
             main()
-
-  workspaces:
-    - name: artifacts
-      description: Workspace containing arbitrary artifacts used during the task run.
-      optional: true
-    - name: data
-      description: The workspace where the snapshot spec json file resides
+    - name: create-trusted-artifact
+      computeResources:
+        limits:
+          memory: 128Mi
+        requests:
+          memory: 128Mi
+          cpu: 250m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/create-trusted-artifact/create-trusted-artifact.yaml
+      params:
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: workDir
+          value: $(params.dataDir)
+        - name: sourceDataArtifact
+          value: $(results.sourceDataArtifact.path)
+    - name: patch-source-data-artifact-result
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 20m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/patch-source-data-artifact-result/patch-source-data-artifact-result.yaml
+      params:
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: sourceDataArtifact
+          value: $(results.sourceDataArtifact.path)

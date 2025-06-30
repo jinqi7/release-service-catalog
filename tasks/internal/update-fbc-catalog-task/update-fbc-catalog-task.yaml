@@ -3,8 +3,6 @@ apiVersion: tekton.dev/v1
 kind: Task
 metadata:
   name: update-fbc-catalog-task
-  labels:
-    app.kubernetes.io/version: "1.2.0"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
@@ -68,9 +66,9 @@ spec:
         quay.io/konflux-ci/release-service-utils:e633d51cd41d73e4b3310face21bb980af7a662f
       computeResources:
         limits:
-          memory: 128Mi
+          memory: 512Mi
         requests:
-          memory: 128Mi
+          memory: 512Mi
           cpu: '1'
       env:
         - name: IIB_SERVICE_URL
@@ -141,12 +139,14 @@ spec:
 
           if [ "$(jq -r '.state' <<< "${build}")" = "complete" ]; then
             indexImageResolved="$(jq -r '.index_image_resolved' <<<  "${build}")"
-            newCatalogCreatedDate="$(date --date "$(skopeo inspect --config "docker://${indexImageResolved}" | \
+            newCatalogCreatedDate="$(date --date "$(skopeo inspect \
+              --retry-times 3 --config "docker://${indexImageResolved}" | \
               jq -r .created)" "+%s")"
 
             # authentication is only required for the targetIndex
             create_auth_file
-            targetIndexCreated="$(skopeo inspect --config "docker://$(params.targetIndex)" | jq -r .created)"
+            targetIndexCreated="$(skopeo inspect --retry-times 3 --config "docker://$(params.targetIndex)" | \
+              jq -r .created)"
 
             if [ -z "${targetIndexCreated}" ]; then
               # we cannot determine the target index created date, stop here. This causes the task to trigger
@@ -286,6 +286,12 @@ spec:
     - name: update-fbc-catalog-wait-for-iib-build-step
       image: >-
         quay.io/konflux-ci/release-service-utils:e633d51cd41d73e4b3310face21bb980af7a662f
+      computeResources:
+        limits:
+          memory: 256Mi
+        requests:
+          memory: 256Mi
+          cpu: 250m
       env:
         - name: IIB_SERVICE_URL
           valueFrom:
@@ -336,7 +342,7 @@ spec:
             # get the manifest digests
             indexImageCopy=$(jq -cr .internal_index_image_copy < "$(results.jsonBuildInfo.path)")
             # Use this to obtain the manifest digests for each arch in manifest list
-            indexImageDigestsRaw=$(skopeo inspect --raw "docker://${indexImageCopy}")
+            indexImageDigestsRaw=$(skopeo inspect --retry-times 3 --raw "docker://${indexImageCopy}")
             # according the IIB team,
             #  "all index images will always be multi-arch with a manifest list"
             #

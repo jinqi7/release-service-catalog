@@ -3,8 +3,6 @@ apiVersion: tekton.dev/v1
 kind: Task
 metadata:
   name: push-disk-images
-  labels:
-    app.kubernetes.io/version: "0.4.3"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
@@ -37,6 +35,12 @@ spec:
   steps:
     - name: run-script
       image: quay.io/konflux-ci/release-service-utils:10bd7e4323de6ace107bbed1fe40613f21684b01
+      computeResources:
+        limits:
+          memory: 512Mi
+        requests:
+          memory: 512Mi
+          cpu: 250m
       script: |
         #!/usr/bin/env bash
         set -ex

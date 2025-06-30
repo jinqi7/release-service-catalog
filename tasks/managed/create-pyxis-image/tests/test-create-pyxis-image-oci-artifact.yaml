@@ -56,7 +56,7 @@ spec:
               value: "$(params.trustedArtifactsDebug)"
         steps:
           - name: setup-values
-            image: quay.io/konflux-ci/release-service-utils:6f53e325678d7a8aac51d80fd1ab62927cf44e73
+            image: quay.io/konflux-ci/release-service-utils:be3ad8aff2267f2b8caf475d1a5759980389aa1c
             script: |
               #!/usr/bin/env bash
               set -eux
@@ -188,7 +188,7 @@ spec:
               - name: sourceDataArtifact
                 value: $(params.sourceDataArtifact)
           - name: check-result
-            image: quay.io/konflux-ci/release-service-utils:6f53e325678d7a8aac51d80fd1ab62927cf44e73
+            image: quay.io/konflux-ci/release-service-utils:be3ad8aff2267f2b8caf475d1a5759980389aa1c
             script: |
               #!/usr/bin/env bash
               set -eux
@@ -243,7 +243,7 @@ spec:
               fi
 
               [ "$(head -n 1 < "$(params.dataDir)"/mock_skopeo.txt)" \
-                = "inspect --raw docker://registry.io/oci-artifact@sha256:mydigest" ]
+                = "inspect --retry-times 3 --raw docker://registry.io/oci-artifact@sha256:mydigest" ]
 
               if [ "$(wc -l < "$(params.dataDir)/mock_select-oci-auth.txt")" != 2 ]; then
                 echo Error: select-oci-with was expected to be called 2 times. Actual calls:

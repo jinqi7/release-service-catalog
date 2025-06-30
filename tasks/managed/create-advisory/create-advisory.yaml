@@ -3,8 +3,6 @@ apiVersion: tekton.dev/v1
 kind: Task
 metadata:
   name: create-advisory
-  labels:
-    app.kubernetes.io/version: "7.0.0"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
@@ -108,6 +106,12 @@ spec:
         value: "$(params.trustedArtifactsDebug)"
   steps:
     - name: skip-trusted-artifact-operations
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 20m
       ref:
         resolver: "git"
         params:
@@ -123,6 +127,12 @@ spec:
         - name: workDir
           value: $(params.dataDir)
     - name: use-trusted-artifact
+      computeResources:
+        limits:
+          memory: 64Mi
+        requests:
+          memory: 64Mi
+          cpu: 30m
       ref:
         resolver: "git"
         params:
@@ -139,6 +149,12 @@ spec:
           value: $(params.sourceDataArtifact)
     - name: update-purl
       image: quay.io/distribution_relengs/publish-to-dev-portal-test-image:purl
+      computeResources:
+        limits:
+          memory: 256Mi
+        requests:
+          memory: 256Mi
+          cpu: 100m
       env:
         - name: CGW_USERNAME
           valueFrom:
@@ -195,10 +211,10 @@ spec:
             # Error if any declared file is missing from the CGW response
             #   If a file is listed in the RPA to be released to CGW, but isn't returned from our API call
             #   then we probably should exit as that shouldn't happen.
-            for declared_file in $(jq -r '.staged.files[].source' <<< "$component"); do
+            for declared_file in $(jq -r '.files[].source' <<< "$component"); do
               declared_basename=$(basename "$declared_file")
               if [[ -z "${FILE_URL_MAP[$declared_basename]}" ]]; then
-                echo "Warning: staged file '$declared_basename' (from $COMPONENT_NAME) was not returned by CGW" >&2
+                echo "Warning: file '$declared_basename' (from $COMPONENT_NAME) was not returned by CGW" >&2
                 exit 1
               fi
             done
@@ -217,7 +233,7 @@ spec:
                 OS=$(jq -r '.os' <<< "$entry")
 
                 FILENAME=$(jq -r --arg arch "$ARCH" --arg os "$OS" \
-                  '.staged.files[] | select(.arch == $arch and .os == $os) | .source' <<< "$component")
+                  '.files[] | select(.arch == $arch and .os == $os) | .source' <<< "$component")
 
                 FILENAME_BASENAME=$(basename "$FILENAME")
                 URL="https://access.cdn.redhat.com${FILE_URL_MAP[$FILENAME_BASENAME]}"
@@ -243,6 +259,12 @@ spec:
         ' "$DATA_FILE" > /tmp/data.tmp && mv /tmp/data.tmp "$DATA_FILE"
     - name: run-script
       image: quay.io/konflux-ci/release-service-utils:0f82be4be43294b6a96846d87ef7f7c0b9e34267
+      computeResources:
+        limits:
+          memory: 512Mi
+        requests:
+          memory: 512Mi
+          cpu: 350m
       script: |
         #!/bin/bash
         set -ex
@@ -439,6 +461,12 @@ spec:
         jq -n --arg url "$URL" --arg internal_url "$INTERNAL_URL" \
           '{"advisory": {"url": $url, "internal_url": $internal_url}}' | tee "$RESULTS_FILE"
     - name: create-trusted-artifact
+      computeResources:
+        limits:
+          memory: 128Mi
+        requests:
+          memory: 128Mi
+          cpu: 250m
       ref:
         resolver: "git"
         params:
@@ -456,6 +484,12 @@ spec:
         - name: sourceDataArtifact
           value: $(results.sourceDataArtifact.path)
     - name: patch-source-data-artifact-result
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 20m
       ref:
         resolver: "git"
         params:

@@ -3,8 +3,6 @@ apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
   name: request-advisory-oci-artifact
-  labels:
-    app.kubernetes.io/version: "0.0.1"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: advisory
@@ -24,6 +22,7 @@ spec:
       description: The revision in the taskGitUrl repo to be used
   tasks:
     - name: request-advisory-oci-artifact
+      retries: 3
       taskRef:
         resolver: "git"
         params:

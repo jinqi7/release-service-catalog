@@ -1,4 +1,4 @@
-FROM quay.io/konflux-ci/release-service-utils@sha256:bd541d08823b7b77a5637af44cb5042bb31d765a18c8739643c8e176f55c83cf
+FROM quay.io/konflux-ci/release-service-utils@sha256:15f323fd71b695633b40a27f0f635f77458bc9e98fb3ce808f2c8389b39a8640
 
 ARG TKN_VERSION=0.40.0
 ARG KUSTOMIZE_VERSION=5.6.0
@@ -18,6 +18,7 @@ RUN tkn version --component client
 
 RUN dnf -y --setopt=tsflags=nodocs install \
     gettext \
+    procps-ng \
     && dnf clean all
 
 RUN python3 -m pip install --user ansible
@@ -29,6 +30,4 @@ RUN curl -L https://github.com/kubernetes-sigs/kustomize/releases/download/kusto
     | tar -C /usr/bin/ -xzf - kustomize &&\
     chmod +x /usr/bin/kustomize
 
-ADD integration-tests/collectors /home/e2e/tests/collectors
-ADD integration-tests/lib /home/e2e/tests/lib
-ADD integration-tests/scripts /home/e2e/tests/scripts
+ADD integration-tests/ /home/e2e/tests/

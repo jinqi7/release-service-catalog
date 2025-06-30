@@ -3,8 +3,6 @@ apiVersion: tekton.dev/v1
 kind: Task
 metadata:
   name: marketplacesvm-push-disk-images
-  labels:
-    app.kubernetes.io/version: "0.2.0"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
@@ -28,18 +26,30 @@ spec:
       type: string
       description: The maximum number of images to be pulled at once.
       default: 3
+    - name: uploadContainerName
+      type: string
+      description: The name of the container to upload the images to.
+      default: "konfluxupload"
   workspaces:
     - name: data
       description: The workspace where the snapshot spec json file resides
   steps:
     - name: pull-and-push-images-to-marketplaces
       image: quay.io/konflux-ci/release-service-utils:6556e8a6b031c1aad4f0472703fd121a6e1cd45d
+      computeResources:
+        limits:
+          memory: 1Gi
+        requests:
+          memory: 1Gi
+          cpu: 450m
       env:
         - name: CLOUD_CREDENTIALS
           valueFrom:
             secretKeyRef:
               name: $(params.cloudMarketplacesSecret)
               key: key
+        - name: UPLOAD_CONTAINER_NAME  # pulled by the pubtools-marketplacesvm script.
+          value: $(params.uploadContainerName)
       script: |
         #!/usr/bin/env bash
         set -eux

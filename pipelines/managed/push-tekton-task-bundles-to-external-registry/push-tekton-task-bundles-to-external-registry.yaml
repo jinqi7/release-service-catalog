@@ -3,8 +3,6 @@ apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
   name: push-tekton-task-bundles-to-external-registry
-  labels:
-    app.kubernetes.io/version: "0.4.0"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
@@ -174,6 +172,7 @@ spec:
       runAfter:
         - collect-data
     - name: apply-mapping
+      retries: 3
       taskRef:
         resolver: "git"
         params:
@@ -273,6 +272,10 @@ spec:
       params:
         - name: dataPath
           value: "$(tasks.collect-data.results.data)"
+        - name: taskGitUrl
+          value: "$(params.taskGitUrl)"
+        - name: taskGitRevision
+          value: "$(params.taskGitRevision)"
       workspaces:
         - name: data
           workspace: release-workspace
@@ -301,6 +304,10 @@ spec:
           value: "$(tasks.collect-data.results.data)"
         - name: registrySecret
           value: $(tasks.collect-registry-token-secret.results.registrySecret)
+        - name: taskGitUrl
+          value: "$(params.taskGitUrl)"
+        - name: taskGitRevision
+          value: "$(params.taskGitRevision)"
       runAfter:
         - collect-registry-token-secret
         - push-snapshot
@@ -325,7 +332,7 @@ spec:
         - name: data
           workspace: release-workspace
       runAfter:
-        - make-repo-public        
+        - make-repo-public
     - name: update-cr-status
       params:
         - name: resource

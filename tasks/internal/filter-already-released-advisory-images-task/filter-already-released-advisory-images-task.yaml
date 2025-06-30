@@ -3,8 +3,6 @@ apiVersion: tekton.dev/v1
 kind: Task
 metadata:
   name: filter-already-released-advisory-images-task
-  labels:
-    app.kubernetes.io/version: "0.1.0"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
@@ -12,11 +10,11 @@ spec:
   description: |
     Filters out images from a snapshot if they are already published in an advisory
     stored in the GitLab advisory repo. Returns a list of component names
-    that still need to be released (i.e., not found in any advisory). 
+    that still need to be released (i.e., not found in any advisory).
   params:
-    - name: snapshot_json
+    - name: snapshot
       type: string
-      description: String containing a JSON representation of the snapshot spec
+      description: Base64 string of gzipped JSON representation of the snapshot spec
     - name: origin
       description: The origin workspace for the release CR
       type: string
@@ -38,6 +36,12 @@ spec:
   steps:
     - name: filter-images
       image: quay.io/konflux-ci/release-service-utils:0b2f257d7a5c2a881c36c23f8ae3cd5e89db593a
+      computeResources:
+        limits:
+          memory: 256Mi
+        requests:
+          memory: 256Mi
+          cpu: 500m
       env:
         - name: GITLAB_HOST
           valueFrom:
@@ -64,8 +68,8 @@ spec:
             secretKeyRef:
               name: $(params.advisory_secret_name)
               key: git_author_email
-        - name: SNAPSHOT_JSON
-          value: "$(params.snapshot_json)"
+        - name: SNAPSHOT
+          value: "$(params.snapshot)"
       script: |
         #!/usr/bin/env bash
         set -eo pipefail
@@ -87,6 +91,10 @@ spec:
           exit 0
         }
         trap 'exitfunc $? $LINENO "$BASH_COMMAND"' EXIT
+
+        SNAPSHOT_JSON=$(base64 -d <<< "$SNAPSHOT" | gunzip)
+
+        echo "Snapshot JSON: $SNAPSHOT_JSON"
 
         ORIGIN="$(params.origin)"
         ADVISORY_BASE_DIR="data/advisories/${ORIGIN}"
@@ -116,18 +124,19 @@ spec:
           exit 0
         fi
 
+        EXISTING_CONTENT=/tmp/existing_content.json
         for ADVISORY_SUBDIR in $EXISTING_ADVISORIES; do
           ADVISORY_FILE="${ADVISORY_BASE_DIR}/${ADVISORY_SUBDIR}/advisory.yaml"
-          EXISTING_CONTENT=$(yq -o=json '.spec.content.images // []' "$ADVISORY_FILE")
+          yq -o=json '.spec.content.images // []' "$ADVISORY_FILE" > "$EXISTING_CONTENT"
 
           echo "Comparing against: $ADVISORY_FILE"
 
-          CONTENT_IMAGES=$(echo "$CONTENT_IMAGES" | jq --argjson existing "$EXISTING_CONTENT" '
+          CONTENT_IMAGES=$(echo "$CONTENT_IMAGES" | jq --slurpfile existing "$EXISTING_CONTENT" '
             map(select(
               .containerImage as $ci |
               .tags as $tags |
               .repository as $repo |
-              ($existing | map(select(
+              ($existing[0] | map(select(
                 .containerImage == $ci and .tags == $tags and .repository == $repo
               )) | length == 0)
             ))')
