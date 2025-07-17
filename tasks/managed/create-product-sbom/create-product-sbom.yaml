@@ -7,30 +7,31 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    Create product-level SBOM from mapped snapshot spec and release notes.
+  description: |-
+    Tekton task to create a product-level SBOM to be uploaded to Atlas from
+    releaseNotes content.
   params:
     - name: dataPath
-      description: Relative path to the JSON data file in the workspace.
+      description: Relative path to the JSON data file in the workspace
       type: string
     - name: snapshotSpec
       type: string
-      description: Path to the mapped snapshot spec.
+      description: Path to the mapped snapshot spec
     - name: sbomPath
-      description: Path to store the updated SBOMs to.
+      description: Path to store the updated SBOMs to
       type: string
       default: "sboms"
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
       description: Expiration date for the trusted artifacts created in the
-        OCI repository. An empty string means the artifacts do not expire.
+        OCI repository. An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -53,12 +54,12 @@ spec:
       description: The revision in the taskGitUrl repo to be used
   workspaces:
     - name: data
-      description: Workspace to save the product-level SBOM to.
+      description: Workspace to save the product-level SBOM to
   results:
     - name: sbomPath
       description: >-
         Relative path to the directory containing the created product-level SBOM
-        in the data workspace.
+        in the data workspace
     - description: Produced trusted data artifact
       name: sourceDataArtifact
       type: string

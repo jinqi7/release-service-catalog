@@ -125,13 +125,15 @@ check_env_vars "$@" # Pass all args for consistency, though check_env_vars doesn
 parse_options "$@" # Parses options and sets CLEANUP, NO_CVE
 
 decrypt_secrets
-delete_old_branches "${component_repo_name}" 2
+delete_old_branches "${component_repo_name}" "${component_type}" 2
 create_github_branch
+patch_component_source
 setup_namespaces # Ensures correct context before resource creation
 cleanup_old_resources "${originating_tool}"
 create_kubernetes_resources # tmpDir is set here
 
 wait_for_component_initialization # component_pr and pr_number are set here
+patch_component_source_before_merge
 merge_github_pr # SHA is set here
 
 wait_for_plr_to_appear # component_push_plr_name is set here

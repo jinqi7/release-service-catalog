@@ -165,6 +165,8 @@ spec:
           value: "$(context.pipelineRun.uid)/test_snapshot_spec.json"
         - name: dataPath
           value: "$(context.pipelineRun.uid)/data.json"
+        - name: environment
+          value: stage
         - name: resultsDirPath
           value: "$(context.pipelineRun.uid)/results"
         - name: synchronously
@@ -265,7 +267,7 @@ spec:
               fi
 
               # Check the advisory_json parameter
-              advisoryJson=$(echo "$internalRequest" | jq -r '.spec.params.advisory_json')
+              advisoryJson=$(echo "$internalRequest" | jq -r '.spec.params.advisory_json' | base64 -d | gunzip -c)
               if [ "$(jq -r '.type' <<< "$advisoryJson")" != "RHBA" ]; then
                 echo "The advisory_json should have had its type overwritten to RHBA because there were no CVEs"
                 echo "and no type was initially provided in the releaseNotes."

@@ -7,11 +7,11 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
+  description: |-
     A tekton task to prepare FBC Release by collecting a valid
     OCP version for each component from given
     containerImage(fbcFragment) in the snapshot, and update
-    the fromIndex and targetIndex with collected
+    the fromIndex, targetIndex and binaryImage with collected
     OCP version and store updated values to snapshot respective
     to each component, so other task can use them.
   params:
@@ -22,7 +22,7 @@ spec:
       description: Path to the JSON string of the merged data to use in the data workspace
       type: string
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
@@ -31,7 +31,7 @@ spec:
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -117,7 +117,7 @@ spec:
         - name: sourceDataArtifact
           value: $(params.sourceDataArtifact)
     - name: prepare-fbc-release
-      image: quay.io/konflux-ci/release-service-utils:e633d51cd41d73e4b3310face21bb980af7a662f
+      image: quay.io/konflux-ci/release-service-utils:ea7868ebdcc7a2116c620255034226611d837f42
       computeResources:
         limits:
           memory: 512Mi

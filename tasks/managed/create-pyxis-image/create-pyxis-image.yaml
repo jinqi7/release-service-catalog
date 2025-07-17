@@ -7,13 +7,22 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    Tekton task that pushes metadata to Pyxis for all container images contained in a snapshot
+  description: |-
+    Tekton task that pushes metadata to Pyxis for all container images contained in a snapshot that is the
+    result of the `apply-mapping` task. It first extracts the containerImages from the snapshot, then runs
+    `skopeo inspect` on each, before finally pushing metadata to Pyxis.
+    
+    The relative path of the pyxis.json file in the data workspace is output as a task result named
+    `pyxisDataPath`.
   params:
     - name: server
       type: string
-      description: The server type to use. Options are 'production','production-internal,'stage-internal' and 'stage'.
+      description: The server type to use. Options are 'production','production-internal,'stage-internal' and 'stage'
       default: production
+    - name: concurrentLimit
+      type: string
+      description: The maximum number of components to be processed at once
+      default: "16"
     - name: pyxisSecret
       type: string
       description: |
@@ -33,7 +42,7 @@ spec:
         the registry and repository fields converted to use Red Hat's official registry.
         E.g. a mapped repository of "quay.io/redhat-pending/product---my-image" will be converted
         to use registry "registry.access.redhat.com" and repository "product/my-image". Also, this
-        repository entry will be marked as published.
+        repository entry will be marked as published
       default: "false"
     - name: snapshotPath
       type: string
@@ -42,16 +51,16 @@ spec:
       description: Path to the JSON string of the merged data to use in the data workspace
       type: string
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
       description: Expiration date for the trusted artifacts created in the
-        OCI repository. An empty string means the artifacts do not expire.
+        OCI repository. An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -139,7 +148,7 @@ spec:
         - name: sourceDataArtifact
           value: $(params.sourceDataArtifact)
     - name: create-pyxis-image
-      image: quay.io/konflux-ci/release-service-utils:be3ad8aff2267f2b8caf475d1a5759980389aa1c
+      image: quay.io/konflux-ci/release-service-utils:ea7868ebdcc7a2116c620255034226611d837f42
       computeResources:
         limits:
           memory: 3Gi
@@ -207,19 +216,22 @@ spec:
         # Default to false
         includeLayers="$(jq -r ".pyxis.includeLayers // false" "${DATA_FILE}")"
 
-        COMPONENTS=$(jq '.components | length' "${SNAPSHOT_SPEC_FILE}")
-        JSON_OUTPUT='{}'
-        for (( i=0; i < COMPONENTS; i++ )); do
-            CONTAINER_IMAGE=$(jq -r ".components[${i}].containerImage" "${SNAPSHOT_SPEC_FILE}")
-            JSON_OUTPUT=$(jq --argjson id $i --arg image "${CONTAINER_IMAGE}" \
-              '.components[$id] += { "containerImage": $image, "pyxisImages": []}' <<< "$JSON_OUTPUT")
-            REPOSITORY=$(jq -r ".components[${i}].repository" "${SNAPSHOT_SPEC_FILE}")
+        # Function to process a single component in parallel
+        process_component() {
+            local component_index=$1
+            local output_file="/tmp/component_${component_index}.json"
+
+            CONTAINER_IMAGE=$(jq -r ".components[${component_index}].containerImage" "${SNAPSHOT_SPEC_FILE}")
+            REPOSITORY=$(jq -r ".components[${component_index}].repository" "${SNAPSHOT_SPEC_FILE}")
             REPOSITORY=${REPOSITORY%:*} # strip tag just in case - it should not be there
             SOURCE_REPO=${CONTAINER_IMAGE%%@sha256:*}
             DIGEST="${CONTAINER_IMAGE##*@}"
             PULLSPEC="${REPOSITORY}@${DIGEST}"
             MEDIA_TYPE=$(skopeo inspect --retry-times 3 --raw "docker://${PULLSPEC}" | jq -r .mediaType)
-            TAGS=$(jq -r ".components[${i}].tags | join(\" \")" "${SNAPSHOT_SPEC_FILE}")
+            TAGS=$(jq -r ".components[${component_index}].tags | join(\" \")" "${SNAPSHOT_SPEC_FILE}")
+
+            # Create component-specific auth file to avoid conflicts
+            local AUTH_FILE="/tmp/auth_${component_index}"
 
             # oras has very limited support for selecting the right auth entry,
             # so create a custom auth file with just one entry before each oras call
@@ -243,6 +255,11 @@ spec:
 
             ARCHITECTURES=$(get-image-architectures "${PULLSPEC}")
 
+            # Initialize component JSON structure
+            local COMPONENT_JSON='{}'
+            COMPONENT_JSON=$(jq --argjson id "$component_index" --arg image "${CONTAINER_IMAGE}" \
+              '.containerImage = $image | .componentIndex = $id | .pyxisImages = []' <<< "$COMPONENT_JSON")
+
             index=0
             while IFS= read -r ARCH_DETAIL;
             do
@@ -257,7 +274,9 @@ spec:
                 fi
 
                 # Save the OCI manifest locally, to pass to a script to create the pyxis entry
-                MANIFEST_FILE="$(params.dataDir)/$(dirname "$(params.snapshotPath)")/oras-manifest-fetch.json"
+                # Use component-specific manifest file to avoid conflicts
+                MANIFEST_FILE="$(params.dataDir)/$(dirname \
+                  "$(params.snapshotPath)")/oras-manifest-fetch-${component_index}-${index}.json"
                 oras manifest fetch \
                   --registry-config "$AUTH_FILE" \
                   "${ORAS_ARGS[@]}" \
@@ -292,7 +311,7 @@ spec:
                     # https://github.com/konflux-ci/build-definitions/issues/1264
 
                     if [[ "$BLOB_TYPE" =~ ^.*\.gzip$|^.*\+gzip$ ]]; then
-                        BLOB_FILE="/tmp/oras-blob-fetch-${BLOB_DIGEST}"
+                        BLOB_FILE="/tmp/oras-blob-fetch-${component_index}-${BLOB_DIGEST}"
                         BLOB_PULLSPEC="${PULLSPEC%%@*}@${BLOB_DIGEST}"
 
                         # Save the blob
@@ -315,7 +334,7 @@ spec:
                         mv "${MANIFEST_FILE}.tmp"  "${MANIFEST_FILE}"
 
                         # Clean up, in case we're dealing with large images
-                        rm "/tmp/oras-blob-fetch-${BLOB_DIGEST}"
+                        rm "${BLOB_FILE}"
                     fi
                 done <<< "$(jq -c '.layers[]' "${MANIFEST_FILE}")"
 
@@ -332,9 +351,9 @@ spec:
                   --architecture-digest "$ARCH_DIGEST" \
                   --architecture "$ARCH" \
                   --rh-push "$(params.rhPush)" \
-                  --dockerfile "${DOCKERFILE_PATH}" | tee "/tmp/output"
+                  --dockerfile "${DOCKERFILE_PATH}" | tee "/tmp/output_${component_index}_${index}"
                 # The rh-push-to-external-registry e2e test depends on this line being in the task log
-                IMAGEID=$(awk '/The image id is/{print $NF}' /tmp/output|head -1)
+                IMAGEID=$(awk '/The image id is/{print $NF}' "/tmp/output_${component_index}_${index}" | head -1)
 
                 # prepare the REPOSITORY string for cleanup_tags
                 TARGET_REPOSITORY="${REPOSITORY#*/}" # remove the host
@@ -351,18 +370,73 @@ spec:
                     "$IMAGEID"
                 fi
 
-                JSON_OUTPUT=$(jq --argjson component_index $i --argjson arch_index $index \
+                COMPONENT_JSON=$(jq --argjson arch_index $index \
                   --arg arch "${ARCH}" --arg imageId "${IMAGEID}" --arg digest "${DIGEST}" \
                   --arg arch_digest "${ARCH_DIGEST}" --arg os "${OS}" \
-                    '.components[$component_index].pyxisImages[$arch_index] += {
+                    '.pyxisImages[$arch_index] += {
                       "arch": $arch,
                       "imageId": $imageId,
                       "digest": $digest,
                       "arch_digest": $arch_digest,
-                      "os": $os}' <<< "$JSON_OUTPUT")
+                      "os": $os}' <<< "$COMPONENT_JSON")
 
                 index=$((index + 1))
             done <<< "$ARCHITECTURES"
+
+            # Save component result to file
+            echo "$COMPONENT_JSON" > "$output_file"
+        }
+
+        COMPONENTS=$(jq '.components | length' "${SNAPSHOT_SPEC_FILE}")
+
+        RUNNING_JOBS="\j" # Bash parameter for number of jobs currently running
+        SUCCESS=true
+
+        # Process each component with concurrency limit
+        for (( i=0; i < COMPONENTS; i++ )); do
+            echo "Starting component processing for component $i"
+            # Limit batch size to concurrent limit
+            while (( ${RUNNING_JOBS@P} >= $(params.concurrentLimit) )); do
+                wait -n || SUCCESS=false
+            done
+            process_component $i > "/tmp/component_${i}.out" 2> "/tmp/component_${i}.err" &
+        done
+
+        # Wait for remaining processes to finish
+        while (( ${RUNNING_JOBS@P} > 0 )); do
+            wait -n || SUCCESS=false
+        done
+        echo "All component processing jobs completed"
+
+        # Print outputs and errors for each component processing job
+        for (( i=0; i < COMPONENTS; i++ )); do
+            if [ -f "/tmp/component_${i}.out" ]; then
+                echo "=== Component $i Output ==="
+                cat "/tmp/component_${i}.out"
+                echo
+            fi
+            if [ -f "/tmp/component_${i}.err" ] && [ -s "/tmp/component_${i}.err" ]; then
+                echo "=== Component $i Errors ==="
+                cat "/tmp/component_${i}.err"
+                echo
+            fi
+        done
+
+        if [ "$SUCCESS" != true ]; then
+            echo "One or more component processing jobs failed. Please check the logs above for details."
+            exit 1
+        fi
+
+        # Collect and merge all component results
+        JSON_OUTPUT='{}'
+        for (( i=0; i < COMPONENTS; i++ )); do
+            if [ -f "/tmp/component_${i}.json" ]; then
+                component_data=$(cat "/tmp/component_${i}.json")
+                component_index=$(jq -r '.componentIndex' <<< "$component_data")
+                JSON_OUTPUT=$(jq --argjson component_index "$component_index" --argjson \
+                  component_data "$component_data" \
+                  '.components[$component_index] = $component_data' <<< "$JSON_OUTPUT")
+            fi
         done
         echo "$JSON_OUTPUT" | tee "$(params.dataDir)/${PYXIS_DATA_PATH}"
     - name: create-trusted-artifact

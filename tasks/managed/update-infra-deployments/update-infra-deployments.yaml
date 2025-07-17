@@ -7,12 +7,12 @@ metadata:
     tekton.dev/tags: "release"
   name: update-infra-deployments
 spec:
-  description: |
-    This task clones a GitHub repository specified in the 'targetGHRepo' key of the input data file.
-    If 'targetGHRepo' is not provided, it defaults to 'redhat-appstudio/infra-deployments'.
-    It then runs a script obtained from the 'infra-deployment-update-script' key in the data file, which can modify
-    text files.
-    Finally, it generates a pull request for the specified repository using the modified files.
+  description: |-
+    * This task clones a GitHub repository specified in the 'targetGHRepo' key of the input data file.
+    * If 'targetGHRepo' is not provided, it defaults to 'defaultTargetGHRepo: redhat-appstudio/infra-deployments'.
+    * It then runs a script obtained from the 'infra-deployment-update-script' key in the data file,
+      which can modify text files.
+    * Finally, it generates a pull request for the specified repository using the modified files.
   params:
     - name: dataJsonPath
       description: path to data json file
@@ -31,7 +31,7 @@ spec:
       default: infra-deployments-pr-creator
       description: secret in the namespace which contains private key for the GitHub App
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
@@ -40,7 +40,7 @@ spec:
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions

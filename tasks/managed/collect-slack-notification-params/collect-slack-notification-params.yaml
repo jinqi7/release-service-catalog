@@ -7,8 +7,9 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    Tekton task that collects slack notification configuration options from Release CRs and the data file
+  description: |-
+    Tekton task that collects slack configuration options from Release CRs and the data file. A formatted message is
+    emitted as a task result for downstream tasks to use.
   params:
     - name: releasePath
       type: string
@@ -25,7 +26,7 @@ spec:
       description: Root URL of HAC UI (hybrid access console)
       default: "https://console.redhat.com/preview/application-pipeline/workspaces"
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: sourceDataArtifact
@@ -39,11 +40,11 @@ spec:
     - name: ociArtifactExpiresAfter
       description: >-
         Expiration date for the trusted artifacts created in the OCI repository.
-        An empty string means the artifacts do not expire.
+        An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: dataDir

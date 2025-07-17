@@ -16,9 +16,3 @@ Here's a brief overview of what you can find in the different directories of thi
 Whenever a change is pushed to this repository and a pull request is created, a yaml lint task will run to ensure that the
 resource definition doesn't contain invalid yaml data. Refer to the [.yamllint file](.yamllint) to see the exact applied
 rules. For more information on yamllint, check the [official documentation](https://yamllint.readthedocs.io/en/stable).
-
-# Versioning
-
-All the resources in this repository are versioned through the use of the `app.kubernetes.io/version` label. Any change
-in one of these resources will modify the version of the resource. Semantic Versioning is used to bump the versions on each
-of those resources.

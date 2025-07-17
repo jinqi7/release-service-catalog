@@ -64,12 +64,14 @@ function select-oci-auth() {
 
 function oras() {
   echo $* >> $(params.dataDir)/mock_oras.txt
-  if [[ "$*" == "blob fetch --registry-config"*"/tmp/oras-blob-fetch-beef.gz"* ]]
+  if [[ "$*" == "blob fetch --registry-config"*"/tmp/oras-blob-fetch"*"-beef.gz"* ]]
   then
-    echo -n 'H4sIAAAAAAAAA0vKzEssqlRISSxJVEjPTy1WyEgtSgUAXVhZVxUAAAA=' | base64 -d > /tmp/oras-blob-fetch-beef.gz
-  elif [[ "$*" == "blob fetch --registry-config"*"/tmp/oras-blob-fetch-pork.gz"* ]]
+    index=$(echo "$*" | grep -oP 'oras-blob-fetch-\K\d+(?=-beef\.gz)')
+    echo -n 'H4sIAAAAAAAAA0vKzEssqlRISSxJVEjPTy1WyEgtSgUAXVhZVxUAAAA=' | base64 -d > /tmp/oras-blob-fetch-${index}-beef.gz
+  elif [[ "$*" == "blob fetch --registry-config"*"/tmp/oras-blob-fetch"*"-pork.gz"* ]]
   then
-    echo -n 'H4sIAAAAAAAAA8vNL0pVSEksSQQA2pxWLAkAAAA=' | base64 -d > /tmp/oras-blob-fetch-pork.gz
+    index=$(echo "$*" | grep -oP 'oras-blob-fetch-\K\d+(?=-pork\.gz)')
+    echo -n 'H4sIAAAAAAAAA8vNL0pVSEksSQQA2pxWLAkAAAA=' | base64 -d > /tmp/oras-blob-fetch-${index}-pork.gz
   elif [[ "$*" == "manifest fetch --registry-config"*image-with-gzipped-layers* ]]
   then
     echo '{"mediaType": "my_media_type", "layers": [{"mediaType": "blob+gzip", "digest": "beef"}, {"mediaType": "blob+gzip", "digest": "pork"}]}'

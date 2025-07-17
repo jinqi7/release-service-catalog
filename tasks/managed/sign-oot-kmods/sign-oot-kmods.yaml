@@ -1,0 +1,267 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: sign-oot-kmods
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/tags: release
+spec:
+  description: >-
+    Task to sign out-of-tree kernel modules using the internal signing server
+  params:
+    - name: dataPath
+      type: string
+      description: Path to the data JSON in the data workspace
+    - name: signedKmodsPath
+      type: string
+      description: Path where the kernel modules are stored in the workspace
+    - name: kerberosRealm
+      type: string
+      description: Name of the key used to sign the kernel modules
+    - name: signingAuthor
+      type: string
+      description: Human name responsible for the signing process
+    - name: checksumFingerprint
+      type: string
+      description: Secret containing the host key database for SSH the server running signing
+    - name: checksumKeytab
+      type: string
+      description: Secret containing keytab file for the Kerberos user / server
+    - name: signing-secret
+      type: string
+      description: Secret containing the fields signHost, SignKey and SignUser
+    - name: ociStorage
+      description: The OCI repository where the Trusted Artifacts are stored
+      type: string
+      default: "empty"
+    - name: ociArtifactExpiresAfter
+      description: Expiration date for the trusted artifacts created in the
+        OCI repository. An empty string means the artifacts do not expire
+      type: string
+      default: "1d"
+    - name: trustedArtifactsDebug
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
+      type: string
+      default: ""
+    - name: orasOptions
+      description: oras options to pass to Trusted Artifacts calls
+      type: string
+      default: ""
+    - name: sourceDataArtifact
+      type: string
+      description: Location of trusted artifacts to be used to populate data directory
+      default: ""
+    - name: dataDir
+      description: The location where data will be stored
+      type: string
+      default: $(workspaces.data.path)
+    - name: taskGitUrl
+      type: string
+      description: The git repository URL for task and StepAction resolution
+      default: https://github.com/konflux-ci/release-service-catalog.git
+    - name: taskGitRevision
+      type: string
+      description: The git revision for task and StepAction resolution
+      default: main
+  workspaces:
+    - name: kmods
+      description: The workspace where unsigned kernel modules are.
+  results:
+    - name: sourceDataArtifact
+      type: string
+      description: Produced trusted data artifact
+  volumes:
+    - name: bs-keytab
+      secret:
+        secretName: $(params.checksumKeytab)    
+    - name: checksum-fingerprint
+      secret:
+        secretName: $(params.checksumFingerprint)
+    - name: workdir
+      emptyDir: {}
+  stepTemplate:
+    volumeMounts:
+      - mountPath: /var/workdir
+        name: workdir
+    env:
+      - name: IMAGE_EXPIRES_AFTER
+        value: $(params.ociArtifactExpiresAfter)
+      - name: "ORAS_OPTIONS"
+        value: "$(params.orasOptions)"
+      - name: "DEBUG"
+        value: "$(params.trustedArtifactsDebug)"
+  steps:
+    - name: skip-trusted-artifact-operations
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 20m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/skip-trusted-artifact-operations/skip-trusted-artifact-operations.yaml
+      params:
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: workDir
+          value: $(params.dataDir)
+    - name: use-trusted-artifact
+      computeResources:
+        limits:
+          memory: 64Mi
+        requests:
+          memory: 64Mi
+          cpu: 30m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/use-trusted-artifact/use-trusted-artifact.yaml
+      params:
+        - name: workDir
+          value: $(params.dataDir)
+        - name: sourceDataArtifact
+          value: $(params.sourceDataArtifact)
+    - name: sign-files
+      image: quay.io/konflux-ci/release-service-utils:0f82be4be43294b6a96846d87ef7f7c0b9e34267
+      computeResources:
+        limits:
+          memory: 512Mi
+        requests:
+          memory: 512Mi
+          cpu: 250m 
+      volumeMounts:
+        - name: checksum-fingerprint
+          mountPath: "/etc/sec-checksum"
+          readOnly: true
+        - name: bs-keytab
+          mountPath: "/etc/sec-keytab"
+          readOnly: true        
+      env:
+        - name: signKey
+          valueFrom:
+            secretKeyRef:
+              name: $(params.signing-secret)
+              key: signKey
+        - name: signHost
+          valueFrom:
+            secretKeyRef:
+              name: $(params.signing-secret)
+              key: signHost
+        - name: signUser
+          valueFrom:
+            secretKeyRef:
+              name: $(params.signing-secret)
+              key: signUser
+      script: |
+        #!/usr/bin/env bash
+        set -eux
+        
+        signedKmodsPath="$(params.signedKmodsPath)"
+        signingAuthor="$(params.signingAuthor)"
+        # Remove newline in signing variables 
+        signUser="${signUser//$'\n'/}"
+        signHost="${signHost//$'\n'/}"
+         
+        echo "Signing OOT modules from $(params.dataDir)/$signedKmodsPath.."
+        SIGNED_KMODS_PATH="$(params.dataDir)/$signedKmodsPath"
+        SSH_OPTS=(
+          -o UserKnownHostsFile=/root/.ssh/known_hosts
+          -o GSSAPIAuthentication=yes
+          -o GSSAPIDelegateCredentials=yes
+        )
+        sign_kmods() {
+             signing_author="$signingAuthor"
+             export signing_author
+             export signKey
+             echo "Executing SSH command to sign OOT kernel module for PipelineRun"
+             ssh "${SSH_OPTS[@]}" "${signUser}@${signHost}" 'export KEY="'"${signKey}"'"; bash -s' <<'EOF'
+             echo "Signing OOT kernel modules using $KEY key..."
+             for kmod in ~/kmods/*.ko; do
+                 if [ -f "$kmod" ]; then
+                     echo "Remote: Signing kernel module $kmod"
+                     rh-signing-client --key "$KEY" --onbehalfof "${signing_author}" --lkmsign "$kmod"
+                     if [ $? -ne 0 ]; then
+                         echo "Remote: ERROR failed to sign $kmod"
+                         exit 1
+                     fi
+                 else
+                     echo "Remote: Skipping entry $kmod (not a regular file or no .ko files found)"
+                 fi
+             done
+             echo "Remote: Finished signing process for PR"
+        EOF
+        }
+        KRB5CCNAME=FILE:/tmp/krb5cc_$(id -u)
+        export KRB5CCNAME
+        kinit -kt /etc/sec-keytab/keytab-build-and-sign.keytab "${signUser}@$(params.kerberosRealm)"
+
+        mkdir -p /root/.ssh
+        chmod 700 /root/.ssh
+        cp /etc/sec-checksum/checksumFingerprint /root/.ssh/known_hosts
+        chmod 600 root/.ssh/known_hosts
+
+        cd "$SIGNED_KMODS_PATH" || exit 1
+        # Copy unsigned kmods to signing server
+        ssh "${SSH_OPTS[@]}" "${signUser}@${signHost}" "mkdir -p ~/kmods"
+        scp "${SSH_OPTS[@]}" "${SIGNED_KMODS_PATH}"/*.ko "${signUser}@${signHost}:~/kmods/"
+        # Sign kmods
+        sign_kmods
+        # Copy back signed kmods to workspace
+        scp "${SSH_OPTS[@]}" "${signUser}@${signHost}:~/kmods/*.ko" "${SIGNED_KMODS_PATH}"/
+    - name: create-trusted-artifact
+      computeResources:
+        limits:
+          memory: 128Mi
+        requests:
+          memory: 128Mi
+          cpu: 250m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/create-trusted-artifact/create-trusted-artifact.yaml
+      params:
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: workDir
+          value: $(params.dataDir)
+        - name: sourceDataArtifact
+          value: $(results.sourceDataArtifact.path)
+    - name: patch-source-data-artifact-result
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 20m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/patch-source-data-artifact-result/patch-source-data-artifact-result.yaml
+      params:
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: sourceDataArtifact
+          value: $(results.sourceDataArtifact.path)

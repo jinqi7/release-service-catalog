@@ -7,23 +7,25 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    Tekton task that collects pyxis configuration options from the data file
+  description: |-
+    Tekton task that collects pyxis configuration options from the data file. The task looks at the data file
+    in the workspace to extract the `server` and `secret` keys for Pyxis. These are both emitted as task results
+    for downstream tasks to use.
   params:
     - name: dataPath
       type: string
       description: Path to the JSON string of the merged data containing the pyxis configuration options to use
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
       description: Expiration date for the trusted artifacts created in the
-        OCI repository. An empty string means the artifacts do not expire.
+        OCI repository. An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions

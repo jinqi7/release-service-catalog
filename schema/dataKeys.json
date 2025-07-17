@@ -15,7 +15,8 @@
           "github",
           "contentGateway",
           "pyxis",
-          "mapping"
+          "mapping",
+          "ootsign"
         ],
         "description": "List of systems that are supported to be required in the data"
       },
@@ -462,45 +463,66 @@
                   }
                 }
               },
-              "contentGateway": {
-                "type": "object",
-                "properties": {
-                  "productName": {
-                    "type": "string",
-                    "description": "productName in content gateway"
-                  },
-                  "productCode": {
-                    "type": "string",
-                    "description": "productCode in content gateway"
-                  },
-                  "productVersionName": {
-                    "type": "string",
-                    "description": "productVersionName in content gateway"
-                  },
-                  "filePrefix": {
-                    "type": "string",
-                    "description": "filePrefix to use to select files to add to content gateway"
-                  },
-                  "mirrorOpenshiftPush": {
-                    "type": "boolean",
-                    "description": "whether or not to push to mirror.openshift.com"
-                  },
-                  "components": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "name": {
-                          "type": "string",
-                          "description": "The component name found in the snapshot e.g. example-component"
-                        },
-                        "description": {
-                          "type": "string",
-                          "description": "Description propogated to Content Gateway"
-                        }
-                      }
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "filename": {
+                      "type": "string",
+                      "description": "file basename"
+                    },
+                    "source": {
+                      "type": "string",
+                      "description": "full path to the file within image"
+                    },
+                    "arch": {
+                      "type": "string",
+                      "description": "Target architecture"
+                    },
+                    "os": {
+                      "type": "string",
+                      "description": "Target operating system"
                     }
                   }
+                }
+              }
+            },
+            "contentGateway": {
+              "type": "object",
+              "properties": {
+                "productName": {
+                  "type": "string",
+                  "description": "productName in content gateway"
+                },
+                "productCode": {
+                  "type": "string",
+                  "description": "productCode in content gateway"
+                },
+                "productVersionName": {
+                  "type": "string",
+                  "description": "productVersionName in content gateway"
+                },
+                "filePrefix": {
+                  "type": "string",
+                  "description": "filePrefix to use to select files to add to content gateway"
+                },
+                "mirrorOpenshiftPush": {
+                  "type": "boolean",
+                  "description": "whether or not to push to mirror.openshift.com"
+                },
+                "contentType": {
+                  "type": "string",
+                  "enum": [
+                    "disk-image",
+                    "binary",
+                    "generic"
+                  ],
+                  "description": "Specifies the type of content being published"
+                },
+                "sign": {
+                  "type": "boolean",
+                  "description": "Whether the artifact should be signed before publishing"
                 }
               },
               "productInfo": {
@@ -618,6 +640,51 @@
         }
       }
     },
+    "ootsign": {
+      "type": "object",
+      "properties": {
+        "kmodsPath": {
+          "type": "string",
+          "description": "Path where kmods are built inside the image"
+        },
+        "signedKmodsPath": {
+          "type": "string",
+          "description": "Directory where signed kmods will be in the internal repository"
+        },
+        "artifact-repo-url": {
+          "type": "string",
+          "description": "Repository URL where the signed oot kmods will be pushed"
+        },
+        "artifact-branch": {
+          "type": "string",
+          "description": "Branch where the signed oot kmods will be pushed"
+        },
+        "vendor": {
+          "type": "string",
+          "description": "Vendor name of the oot kmods"
+        },
+        "signing-secret": {
+          "type": "string",
+          "description": "Secret that includes signUser, signKey and signHost keys"
+        },
+        "signingAuthor": {
+          "type": "string",
+          "description": "The name of the author that rh-signing-client will set for --onbehalfof"
+        },
+        "artifact-repo-token": {
+          "type": "string",
+          "description": "Secret containing access token to push signed modules"
+        },
+        "checksumFingerprint": {
+          "type": "string",
+          "description": "Secret containing the host key database for SSH the server running signing"
+        },
+        "checksumKeytab": {
+          "type": "string",
+          "description": "Secret containing keytab file for the Kerberos user/server"
+        }
+      }
+    },
     "cdn": {
       "type": "object",
       "properties": {
@@ -655,6 +722,24 @@
         "awsSecret": {
           "type": "string",
           "description": "The k8s secret containing the aws credential for MRRC aws access"
+        },
+        "sign": {
+          "type": "object",
+          "description": "The signing configuration through RADAS",
+          "properties": {
+            "signKey": {
+              "type": "string",
+              "description": "The signing key used to do signing"
+            },
+            "signCASecret": {
+              "type": "string",
+              "description": "The k8s secret containing ca files for radas access"
+            },
+            "signIgnores": {
+              "type": "array",
+              "description": "Patterns to filter the files which will not need to do signing"
+            }
+          }
         },
         "charonConfig": {
           "type": "string",
@@ -703,6 +788,10 @@
           "description": "The tekton runner for running push-rpm-to-koji tekton task"
         }
       }
+    },
+    "skipFilter": {
+      "type": "boolean",
+      "description": "If true, skip filtering of already-released images and process all components in the snapshot. Default: false."
     }
   },
   "allOf": [
@@ -943,8 +1032,17 @@
               "environment",
               "release",
               "awsSecret",
-              "charonConfig"
-            ]
+              "charonConfig",
+              "signing"
+            ],
+            "properties": {
+              "signing": {
+                "required": [
+                  "signKey",
+                  "signCASecret"
+                ]
+              }
+            }
           },
           "releaseNotes": {
             "required": [
@@ -1000,19 +1098,8 @@
                         "productName",
                         "productCode",
                         "productVersionName",
-                        "mirrorOpenshiftPush",
-                        "components"
-                      ],
-                      "properties": {
-                        "components": {
-                          "items": {
-                            "required": [
-                              "name",
-                              "description"
-                            ]
-                          }
-                        }
-                      }
+                        "contentType"
+                      ]
                     }
                   }
                 }
@@ -1041,6 +1128,38 @@
             "required": [
               "server",
               "secret"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "systems": {
+            "contains": {
+              "const": "ootsign"
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "ootsign"
+        ],
+        "properties": {
+          "ootsign": {
+            "required": [
+              "kmodsPath",
+              "signedKmodsPath",
+              "artifact-repo-url",
+              "artifact-repo-token",
+              "artifact-branch",
+              "vendor",
+              "signing-secret",
+              "signingAuthor",
+              "checksumFingerprint",
+              "checksumKeytab"
             ]
           }
         }

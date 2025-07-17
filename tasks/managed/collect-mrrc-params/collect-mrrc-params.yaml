@@ -7,6 +7,13 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
+  description: |-
+    Tekton task that collects MRRC(maven.repository.redhat.com) configuration options from
+    the data file. MRRC is used to host maven artifacts of Red Hat Middleware products.
+    This task looks at the data file in the workspace to extract the params like
+    `mrrc.*`, `cosignPubKeySecret` and `charonAWSSecret` keys for MRRC.
+    `mrrc.*` will be stored in a mrrc.env file and are emitted as task results with
+    other three for downstream tasks to use.
   params:
     - name: dataJsonPath
       type: string
@@ -14,6 +21,43 @@ spec:
     - name: snapshotPath
       description: Path to the JSON string of the Snapshot spec in the data workspace
       type: string
+    - name: ociStorage
+      description: The OCI repository where the Trusted Artifacts are stored
+      type: string
+      default: "empty"
+    - name: ociArtifactExpiresAfter
+      description: Expiration date for the trusted artifacts created in the
+        OCI repository. An empty string means the artifacts do not expire
+      type: string
+      default: "1d"
+    - name: trustedArtifactsDebug
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
+      type: string
+      default: ""
+    - name: orasOptions
+      description: oras options to pass to Trusted Artifacts calls
+      type: string
+      default: ""
+    - name: sourceDataArtifact
+      type: string
+      description: Location of trusted artifacts to be used to populate data directory
+      default: ""
+    - name: dataDir
+      description: The location where data will be stored
+      type: string
+      default: $(workspaces.data.path)
+    - name: taskGitUrl
+      type: string
+      description: The url to the git repo where the release-service-catalog tasks and stepactions to be used are stored
+    - name: taskGitRevision
+      type: string
+      description: The revision in the taskGitUrl repo to be used
+    - name: releasePath
+      type: string
+      description: Path to the release data JSON file      
+  workspaces:
+    - name: data
+      description: The workspace where the extra config file containing the mapping and snapshot json reside
   results:
     - name: mrrcParamFilePath
       description: path of the env file for other tasks to consume
@@ -21,7 +65,68 @@ spec:
       description: path of the charon config file for other tasks to consume
     - name: charonAWSSecret
       description: the secret name for charon aws credential file
+    - name: sourceDataArtifact
+      type: string
+      description: Produced trusted data artifact
+    - name: charonSignCASecret
+      description: the secret name for ca files for radas signing      
+  volumes:
+    - name: workdir
+      emptyDir: {}
+  stepTemplate:
+    volumeMounts:
+      - mountPath: /var/workdir
+        name: workdir
+    env:
+      - name: IMAGE_EXPIRES_AFTER
+        value: $(params.ociArtifactExpiresAfter)
+      - name: "ORAS_OPTIONS"
+        value: "$(params.orasOptions)"
+      - name: "DEBUG"
+        value: "$(params.trustedArtifactsDebug)"
   steps:
+    - name: skip-trusted-artifact-operations
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 20m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/skip-trusted-artifact-operations/skip-trusted-artifact-operations.yaml
+      params:
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: workDir
+          value: $(params.dataDir)
+    - name: use-trusted-artifact
+      computeResources:
+        limits:
+          memory: 64Mi
+        requests:
+          memory: 64Mi
+          cpu: 30m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/use-trusted-artifact/use-trusted-artifact.yaml
+      params:
+        - name: workDir
+          value: $(params.dataDir)
+        - name: sourceDataArtifact
+          value: $(params.sourceDataArtifact)
     - name: collect-mrrc-params
       image: quay.io/konflux-ci/release-service-utils:28fca729e118024bd0f1bd8db4f2651a130ef152
       computeResources:
@@ -34,7 +139,7 @@ spec:
         #!/usr/bin/env bash
         set -eux
 
-        WORK_DIR=$(workspaces.data.path)
+        WORK_DIR=$(params.dataDir)
         cd $WORK_DIR
 
         DATA_FILE="$WORK_DIR/$(params.dataJsonPath)"
@@ -50,6 +155,9 @@ spec:
         echo "export MRRC_PRODUCT_NAME=$productName" >> "$MRRC_ENV_FILE_PATH"
         echo "export MRRC_PRODUCT_VERSION=$productVersion" >> "$MRRC_ENV_FILE_PATH"
 
+        sign_key="$(jq -re '.mrrc.signing.signKey' "$DATA_FILE")"
+        echo "export MRRC_SIGN_KEY=$sign_key" >> "$MRRC_ENV_FILE_PATH"
+
         SNAPSHOT_PATH="$WORK_DIR/$(params.snapshotPath)"
         zipRegistries="$(jq -re '[.components[].containerImage] | join("%")' "$SNAPSHOT_PATH")"
         echo "export MRRC_ZIP_REGISTRY=$zipRegistries" >> "$MRRC_ENV_FILE_PATH"
@@ -57,10 +165,58 @@ spec:
         awsSecret="$(jq -re '.mrrc.awsSecret' $DATA_FILE)"
         echo -n "$awsSecret" > "$(results.charonAWSSecret.path)"
 
+        sign_ca_secret="$(jq -re '.mrrc.signing.signCASecret' "$DATA_FILE")"
+        echo -n "$sign_ca_secret" > "$(results.charonSignCASecret.path)"
+
+        AUTHOR=$(jq -re '.status.attribution.author' "$WORK_DIR/$(params.releasePath)")
+        echo "export MRRC_AUTHOR=$AUTHOR" >> "$MRRC_ENV_FILE_PATH"
+
         echo -n "$MRRC_ENV_FILE_PATH" > "$(results.mrrcParamFilePath.path)"
 
         CHARON_CFG_FILE_PATH="$(dirname "$(params.dataJsonPath)")/charon-config.yaml"
         jq -re '.mrrc.charonConfig' "$DATA_FILE" > "$CHARON_CFG_FILE_PATH"
         echo -n "$CHARON_CFG_FILE_PATH" > "$(results.charonConfigFilePath.path)"
-  workspaces:
-    - name: data
+    - name: create-trusted-artifact
+      computeResources:
+        limits:
+          memory: 128Mi
+        requests:
+          memory: 128Mi
+          cpu: 250m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/create-trusted-artifact/create-trusted-artifact.yaml
+      params:
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: workDir
+          value: $(params.dataDir)
+        - name: sourceDataArtifact
+          value: $(results.sourceDataArtifact.path)
+    - name: patch-source-data-artifact-result
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 20m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/patch-source-data-artifact-result/patch-source-data-artifact-result.yaml
+      params:
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: sourceDataArtifact
+          value: $(results.sourceDataArtifact.path)

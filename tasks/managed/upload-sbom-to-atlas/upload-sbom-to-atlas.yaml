@@ -7,17 +7,20 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    This task recursively scans for CycloneDX and SPDX SBOMs in a specified
-    directory and uploads them to the Atlas service. It includes a retry
-    mechanism that saves failed uploads to an S3 bucket, so that the upload can
-    be retried by another service (Bombino).
+  description: |-
+    This Tekton task gathers SBOM data from a directory specified by the parameters
+    and uploads them to Atlas. Supports both CycloneDX and SPDX format. If the push 
+    to Atlas fails, the SBOM is pushed to an S3 bucket. The push to Atlas is then 
+    retried asynchronously from the bucket by another service. (Bombino)
+    
+    The provided directory is searched for SBOMs recursively and all found SBOMs
+    are uploaded as-is to Atlas.
   params:
     - name: sbomDir
       description: >-
         Directory containing SBOM files. The task will search for JSON
         SBOMs recursively in this directory and upload them all to Atlas.
-        The path is relative to the 'data' workspace.
+        The path is relative to the 'data' workspace
       type: string
     - name: httpRetries
       default: "3"
@@ -36,16 +39,16 @@ spec:
       description: URL of the SSO token issuer
       type: string
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
       description: Expiration date for the trusted artifacts created in the
-        OCI repository. An empty string means the artifacts do not expire.
+        OCI repository. An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -72,9 +75,9 @@ spec:
       type: string
       description: The revision in the taskGitUrl repo to be used
     - name: retryAWSSecretName
-      description: Name of the Secret containing AWS credentials for retry mechanism.
+      description: Name of the Secret containing AWS credentials for retry mechanism
     - name: retryS3Bucket
-      description: Name of the S3 bucket for the retry mechanism.
+      description: Name of the S3 bucket for the retry mechanism
   workspaces:
     - name: data
   results:

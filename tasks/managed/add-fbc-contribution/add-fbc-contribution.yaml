@@ -7,8 +7,8 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    Task to create internalrequests to add contributions to index images
+  description: |-
+    Task to create an internalrequest to add fbc contributions to index images
   params:
     - name: snapshotPath
       description: Path to the JSON string of the mapped Snapshot spec in the data workspace
@@ -29,7 +29,7 @@ spec:
       type: string
       description: Path to the results directory in the data workspace
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
@@ -38,7 +38,7 @@ spec:
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -169,7 +169,7 @@ spec:
         echo -n "$RESULTS_FILE" > "$(results.internalRequestResultsFile.path)"
         RESULTS_FILE="$(params.dataDir)/$(params.resultsDirPath)/internal-requests-results.json"
 
-        echo -n "$(params.dataDir)/$(context.pipelineRun.uid)/ir-$(context.taskRun.uid)-result.json" \
+        echo -n "$(params.dataDir)/$(params.pipelineRunUid)/ir-$(context.taskRun.uid)-result.json" \
           > "$(results.requestResultsFile.path)"
 
         default_build_timeout_seconds="3600"
@@ -258,6 +258,10 @@ spec:
             target_index="${target_index}-${product_name}-${product_version}-${timestamp}"
           fi
 
+          finally_task_timeout=300
+          pipeline_timeout=$(date -u "+%Hh%Mm%Ss" -d @$(("${request_timeout_seconds}"+"${finally_task_timeout}")))
+          task_timeout=$(date -u "+%Hh%Mm%Ss" -d @$(("${request_timeout_seconds}")))
+
           echo "Processing fragment: ${fbc_fragment}:"
           # The internal-request script will create the InternalRequest and wait until it finishes to get its status
           # If it fails (Failed, Rejected or Timed out) the script will exit and display the reason.
@@ -277,6 +281,8 @@ spec:
               -p taskGitRevision="$(params.taskGitRevision)" \
               --service-account "${internal_request_service_account}" \
               -l ${pipelinerun_label}="$(params.pipelineRunUid)" \
+              --pipeline-timeout "${pipeline_timeout}" \
+              --task-timeout "${task_timeout}" \
               -t "${request_timeout_seconds}" |tee "$(params.dataDir)"/ir-"$(context.taskRun.uid)"-output.log
 
           internalRequest=$(awk -F"'" '/created/ { print $2 }' \

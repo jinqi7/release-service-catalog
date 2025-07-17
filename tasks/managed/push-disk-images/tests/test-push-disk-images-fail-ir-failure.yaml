@@ -7,13 +7,54 @@ metadata:
     test/assert-task-failure: "run-task"
 spec:
   description: |
-    Run the push-disk-images task with the InternalRequest failing and ensure the task fails. The InternalRequest
-    itself will never fail, but the status.results field of it will reflect the failure.
+    Run the push-disk-images task and ensure it fails when the internal request fails
   workspaces:
     - name: tests-workspace
+  params:
+    - name: ociStorage
+      description: The OCI repository where the Trusted Artifacts are stored.
+      type: string
+    - name: ociArtifactExpiresAfter
+      description: Expiration date for the trusted artifacts created in the
+        OCI repository. An empty string means the artifacts do not expire.
+      type: string
+      default: "1d"
+    - name: orasOptions
+      description: oras options to pass to Trusted Artifacts calls
+      type: string
+      default: "--insecure"
+    - name: trustedArtifactsDebug
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      type: string
+      default: ""
+    - name: dataDir
+      description: The location where data will be stored
+      type: string
   tasks:
     - name: setup
+      workspaces:
+        - name: data
+          workspace: tests-workspace
       taskSpec:
+        results:
+          - name: sourceDataArtifact
+            type: string
+        workspaces:
+          - name: data
+        volumes:
+          - name: workdir
+            emptyDir: {}
+        stepTemplate:
+          volumeMounts:
+            - mountPath: /var/workdir
+              name: workdir
+          env:
+            - name: IMAGE_EXPIRES_AFTER
+              value: $(params.ociArtifactExpiresAfter)
+            - name: "ORAS_OPTIONS"
+              value: "$(params.orasOptions)"
+            - name: "DEBUG"
+              value: "$(params.trustedArtifactsDebug)"
         steps:
           - name: setup
             image: quay.io/konflux-ci/release-service-utils:10bd7e4323de6ace107bbed1fe40613f21684b01
@@ -21,8 +62,8 @@ spec:
               #!/usr/bin/env bash
               set -eux
 
-              mkdir "$(workspaces.data.path)/results"
-              cat > "$(workspaces.data.path)/snapshot_spec.json" << EOF
+              mkdir -p "$(params.dataDir)/results"
+              cat > "$(params.dataDir)/snapshot_spec.json" << EOF
               {
                 "application": "disk-images",
                 "components": [
@@ -40,7 +81,7 @@ spec:
               }
               EOF
 
-              cat > "$(workspaces.data.path)/data.json" << EOF
+              cat > "$(params.dataDir)/data.json" << EOF
               {
                 "contentGateway": {
                   "productName": "Konflux test product",
@@ -59,9 +100,32 @@ spec:
                 }
               }
               EOF
-      workspaces:
-        - name: data
-          workspace: tests-workspace
+          - name: skip-trusted-artifact-operations
+            ref:
+              name: skip-trusted-artifact-operations
+            params:
+              - name: ociStorage
+                value: $(params.ociStorage)
+              - name: workDir
+                value: $(params.dataDir)
+          - name: create-trusted-artifact
+            ref:
+              name: create-trusted-artifact
+            params:
+              - name: ociStorage
+                value: $(params.ociStorage)
+              - name: workDir
+                value: $(params.dataDir)
+              - name: sourceDataArtifact
+                value: $(results.sourceDataArtifact.path)
+          - name: patch-source-data-artifact-result
+            ref:
+              name: patch-source-data-artifact-result
+            params:
+              - name: ociStorage
+                value: $(params.ociStorage)
+              - name: sourceDataArtifact
+                value: $(results.sourceDataArtifact.path)
     - name: run-task
       taskRef:
         name: push-disk-images
@@ -74,6 +138,16 @@ spec:
           value: $(context.pipelineRun.uid)
         - name: resultsDirPath
           value: results
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: orasOptions
+          value: $(params.orasOptions)
+        - name: sourceDataArtifact
+          value: "$(tasks.setup.results.sourceDataArtifact)=$(params.dataDir)"
+        - name: dataDir
+          value: $(params.dataDir)
+        - name: trustedArtifactsDebug
+          value: $(params.trustedArtifactsDebug)
         - name: taskGitUrl
           value: https://localhost
         - name: taskGitRevision

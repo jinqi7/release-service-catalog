@@ -7,7 +7,7 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
+  description: |-
     Task to create internalrequests or pipelineruns to sign snapshot components
   params:
     - name: snapshotPath
@@ -35,7 +35,7 @@ spec:
       description: The uid of the current pipelineRun. Used as a label value when creating internal requests
     - name: pyxisServer
       type: string
-      description: The server type to use. Options are 'production','production-internal,'stage-internal' and 'stage'.
+      description: The server type to use. Options are 'production','production-internal,'stage-internal' and 'stage'
       default: production
     - name: pyxisSecret
       type: string
@@ -53,18 +53,18 @@ spec:
       description: |
         The relative path in the workspace to a text file that contains a list of repositories
         that needs registry.access.redhat.com image references to be signed (i.e.
-        requires_terms=true), one repository string per line, e.g. "rhtas/cosign-rhel9".
+        requires_terms=true), one repository string per line, e.g. "rhtas/cosign-rhel9"
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
       description: Expiration date for the trusted artifacts created in the
-        OCI repository. An empty string means the artifacts do not expire.
+        OCI repository. An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -73,6 +73,7 @@ spec:
       default: ""
     - name: sourceDataArtifact
       type: string
+      description: Location of trusted artifacts to be used to populate data directory
       default: ""
     - name: dataDir
       description: The location where data will be stored
@@ -250,6 +251,11 @@ spec:
         declare -a to_sign_references=()
         declare -a to_sign_digests=()
 
+        # Arrays to store information for parallel processing
+        declare -a find_signatures_jobs=()
+        declare -a component_data=()
+
+        # First pass: collect all find_signatures calls and start them in parallel
         for (( COMPONENTS_INDEX=0; COMPONENTS_INDEX<COMPONENTS_LENGTH; COMPONENTS_INDEX++ )); do
 
             referenceContainerImage=$(jq -r ".components[${COMPONENTS_INDEX}].containerImage" "${SNAPSHOT_PATH}")
@@ -267,7 +273,7 @@ spec:
             manifest_digests="${referenceContainerImage#*@}"
             # For multi arch, also sign all the manifests inside
             if [ "$(jq -r '.mediaType' <<< "$RAW_OUTPUT")" != "application/vnd.oci.image.manifest.v1+json" ] ; then
-              nested_digests=$(jq -r '.manifests[].digest' <<< "$RAW_OUTPUT")
+              nested_digests=$(jq -r '[.manifests[].digest] | join(" ")' <<< "$RAW_OUTPUT")
               manifest_digests="$manifest_digests $nested_digests"
             fi
 
@@ -297,13 +303,59 @@ spec:
               REGISTRY_REFERENCES+=("${registry_access_repo}")
             fi
 
-            for manifest_digest in $manifest_digests; do
+            # Store component data for later processing
+            component_data+=("${COMPONENTS_INDEX}|${repository}|${TAGS}|${manifest_digests}|${sourceContainerDigest}|${rh_registry_repo}|${registry_access_repo}")
 
+            # Start find_signatures jobs in parallel for manifest digests
+            for manifest_digest in $manifest_digests; do
+              echo "Starting find_signatures job for manifest digest: ${manifest_digest}"
               find_signatures --pyxis-graphql-api "${PYXIS_GRAPHQL_URL}" \
                   --manifest_digest "${manifest_digest}" \
                   --repository "${repository}" \
-                  --output_file "/tmp/${manifest_digest}"
+                  --output_file "/tmp/${manifest_digest}" &
+              find_signatures_jobs+=($!)
+            done
 
+            # Start find_signatures job for source container digest if it exists
+            if [ "${sourceContainerDigest}" != "" ] ; then
+              echo "Starting find_signatures job for source container digest: ${sourceContainerDigest}"
+              find_signatures --pyxis-graphql-api "${PYXIS_GRAPHQL_URL}" \
+                  --manifest_digest "${sourceContainerDigest}" \
+                  --repository "${repository}" \
+                  --output_file "/tmp/${sourceContainerDigest}" &
+              find_signatures_jobs+=($!)
+            fi
+        done
+
+        # Wait for all find_signatures jobs to complete
+        echo "Waiting for ${#find_signatures_jobs[@]} find_signatures jobs to complete..."
+        for job in "${find_signatures_jobs[@]}"; do
+          wait "$job"
+        done
+        echo "All find_signatures jobs completed"
+
+        # Second pass: process the results now that all find_signatures calls are complete
+        for component_info in "${component_data[@]}"; do
+            echo "Processing component_info: ${component_info}"
+
+            IFS='|' read -r COMPONENTS_INDEX repository TAGS manifest_digests sourceContainerDigest \
+              rh_registry_repo registry_access_repo <<< "$component_info"
+
+            echo "repository: ${repository}"
+            echo "TAGS: ${TAGS}"
+            echo "manifest_digests: ${manifest_digests}"
+            echo "sourceContainerDigest: ${sourceContainerDigest}"
+            echo "rh_registry_repo: ${rh_registry_repo}"
+            echo "registry_access_repo: ${registry_access_repo}"
+
+            # Sign rh-registry-repo references (always) and registry-access-repo references
+            # (only if signatures for this registry are required)
+            REGISTRY_REFERENCES=("${rh_registry_repo}")
+            if grep -q "^${repository}$" "${SIGN_REGISTRY_ACCESS_FILE}"; then
+              REGISTRY_REFERENCES+=("${registry_access_repo}")
+            fi
+
+            for manifest_digest in $manifest_digests; do
               # Iterate over both rh-registry-repo and registry-access-repo
               for registry_reference in "${REGISTRY_REFERENCES[@]}"; do
 
@@ -323,12 +375,6 @@ spec:
             done
 
             if [ "${sourceContainerDigest}" != "" ] ; then
-
-                find_signatures --pyxis-graphql-api "${PYXIS_GRAPHQL_URL}" \
-                    --manifest_digest "${sourceContainerDigest}" \
-                    --repository "${repository}" \
-                    --output_file "/tmp/${sourceContainerDigest}"
-
                 for registry_reference in "${REGISTRY_REFERENCES[@]}"; do
 
                   for tag in ${TAGS}; do
@@ -336,14 +382,14 @@ spec:
 
                     if ! grep -q "^${registry_reference}:${sourceTag}$" "/tmp/${sourceContainerDigest}" ; then
                       to_sign_references+=("${registry_reference}:${sourceTag}")
-                      to_sign_digests+=("${manifest_digest}")
+                      to_sign_digests+=("${sourceContainerDigest}")
                     else
                       echo "Signature already exists for:"
                       echo "- reference=${registry_reference}:${sourceTag}"
                       echo "- manifest_digest=${sourceContainerDigest}"
                     fi
+                  done
                 done
-              done
             fi
         done
 

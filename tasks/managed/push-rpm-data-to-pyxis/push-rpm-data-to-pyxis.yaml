@@ -7,7 +7,7 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
+  description: |-
     Tekton task that extracts all rpms from the sboms and pushes them to Pyxis as an RPM Manifest.
     In addition, it will also update ContainerImage.content_sets field in Pyxis to include
     all repository_id strings found in rpm purl strings in the sboms.
@@ -21,23 +21,23 @@ spec:
         The kubernetes secret to use to authenticate to Pyxis. It needs to contain two keys: key and cert
     - name: server
       type: string
-      description: The server type to use. Options are 'production','production-internal,'stage-internal' and 'stage'.
+      description: The server type to use. Options are 'production','production-internal,'stage-internal' and 'stage'
       default: production
     - name: concurrentLimit
       type: string
       description: The maximum number of images to be processed at once
       default: 4
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
       description: Expiration date for the trusted artifacts created in the
-        OCI repository. An empty string means the artifacts do not expire.
+        OCI repository. An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions

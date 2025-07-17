@@ -7,8 +7,9 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    Tekton task to run file updates
+  description: |-
+    Tekton task to create InternalRequests for each repository that needs to be updated. This information is extracted
+    from the field `spec.data.fileUpdates` in the ReleasePlanAdmission resource.
   params:
     - name: jsonKey
       type: string
@@ -39,16 +40,16 @@ spec:
       description: Path to the results directory in the data workspace
       type: string
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
       description: Expiration date for the trusted artifacts created in the
-        OCI repository. An empty string means the artifacts do not expire.
+        OCI repository. An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -57,6 +58,7 @@ spec:
       default: ""
     - name: sourceDataArtifact
       type: string
+      description: Location of trusted artifacts to be used to populate data directory
       default: ""
     - name: dataDir
       description: The location where data will be stored
@@ -182,6 +184,11 @@ spec:
           updatedPaths=$(update-paths -p "${paths}" -f "$(params.dataDir)/$(params.snapshotPath)")
           echo "done"
 
+          requestTimeout=$(params.requestTimeout)
+          pipelineTimeoutSeconds=$((requestTimeout+300))
+          pipelineTimeout=$(date -u -d @"${pipelineTimeoutSeconds}" +"%Hh%Mm%Ss")
+          taskTimeout=$(date -u -d @"${requestTimeout}" +"%Hh%Mm%Ss")
+
           echo -en "  Creating InternalRequest to produce file-updates..."
           requestId="$(openssl rand -hex 12)"
           internal-request --pipeline "$(params.request)" \
@@ -195,6 +202,8 @@ spec:
                            -p taskGitRevision="$(params.taskGitRevision)" \
                            -s "$(params.synchronously)" \
                            -t "$(params.requestTimeout)" \
+                           --pipeline-timeout "$pipelineTimeout" \
+                           --task-timeout "$taskTimeout" \
                            -l ${TASK_LABEL}="${TASK_ID}" \
                            -l ${REQUEST_LABEL}="${requestId}" \
                            -l "${PIPELINERUN_LABEL}=$(params.pipelineRunUid)"

@@ -7,15 +7,17 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    Task to encode the Terraform Checksum file
+  description: |-
+    Task to encode the Terraform Checksum file.
+    
+    It returns as a result the blob to sign, that is the result of the base64 encoded checksum
   params:
     - name: binaries_dir
       type: string
       description: Path where the binaries are stored in the workspace
       default: "binaries"
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
@@ -24,7 +26,7 @@ spec:
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions

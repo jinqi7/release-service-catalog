@@ -56,7 +56,7 @@ spec:
               value: "$(params.trustedArtifactsDebug)"
         steps:
           - name: setup-values
-            image: quay.io/konflux-ci/release-service-utils:be3ad8aff2267f2b8caf475d1a5759980389aa1c
+            image: quay.io/konflux-ci/release-service-utils:ea7868ebdcc7a2116c620255034226611d837f42
             script: |
               #!/usr/bin/env bash
               set -eux
@@ -208,7 +208,7 @@ spec:
               - name: sourceDataArtifact
                 value: $(params.sourceDataArtifact)
           - name: check-result
-            image: quay.io/konflux-ci/release-service-utils:be3ad8aff2267f2b8caf475d1a5759980389aa1c
+            image: quay.io/konflux-ci/release-service-utils:ea7868ebdcc7a2116c620255034226611d837f42
             script: |
               #!/usr/bin/env bash
               set -eux
@@ -232,15 +232,16 @@ spec:
               inspect --retry-times 3 --raw docker://registry.io/image3@sha256:mydigest3
               EOF
 
+              mock_skopeo_calls="$(sort < "$(params.dataDir)/mock_skopeo.txt" | md5sum)"
               # check that the actual calls match the expected calls
               if [ "$(md5sum < "$(params.dataDir)/skopeo_expected_calls.txt")" \
-                != "$(md5sum < "$(params.dataDir)/mock_skopeo.txt")" ]
+                != "${mock_skopeo_calls}" ]
               then
                 echo "Error: Actual skopeo calls do not match expected calls."
                 echo Expected calls:
                 cat "$(params.dataDir)/skopeo_expected_calls.txt"
                 echo Actual calls:
-                cat "$(params.dataDir)/mock_skopeo.txt"
+                cat "${mock_skopeo_calls}"
                 exit 1
               fi
 
@@ -250,15 +251,20 @@ spec:
                 exit 1
               fi
 
-              # check if the correct arch and image id are set in the json file
-              jq -e '.components[0].pyxisImages[0] | ( .arch == "amd64" ) and ( .imageId == "0001" )
-                and ( .os == "linux" )' "$(params.dataDir)/$(params.pyxisDataPath)"
+              amdCount=$(jq '[.components[].pyxisImages[] | select(.arch == "amd64")] | length' \
+                "$(params.dataDir)/$(params.pyxisDataPath)")
+              if [ "$amdCount" != 3 ]; then
+                echo "Error: amd64 images were expected to be 3. Actual count: $amdCount"
+                exit 1
+              fi
 
-              jq -e '.components[1].pyxisImages[0] | ( .arch == "amd64" ) and ( .imageId == "0002" )
-                and ( .os == "linux" )' "$(params.dataDir)/$(params.pyxisDataPath)"
-
-              jq -e '.components[2].pyxisImages[0] | ( .arch == "amd64" ) and ( .imageId == "0003" )
-                and ( .os == "linux" )' "$(params.dataDir)/$(params.pyxisDataPath)"
+              osCount=$(jq '[.components[].pyxisImages[]] | all(.os == "linux")' \
+                "$(params.dataDir)/$(params.pyxisDataPath)")
+              if [ "$osCount" != "true" ]; then
+                echo "Error: all images were expected to be linux."
+                echo "osCount: $osCount"
+                exit 1
+              fi
 
       runAfter:
         - run-task

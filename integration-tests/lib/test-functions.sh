@@ -8,6 +8,11 @@ log_error() {
     exit "${2:-1}" # Exit with provided code or 1 by default
 }
 
+# Helper function to log errors
+log_warning() {
+    echo "⚠️ Warning: $1"
+}
+
 # Function to check for required environment variables
 check_env_vars() {
     echo "Checking required environment variables..."
@@ -19,6 +24,7 @@ check_env_vars() {
         ["RELEASE_CATALOG_GIT_REVISION"]="Missing RELEASE_CATALOG_GIT_REVISION"
     )
 
+    # Check core required variables
     for var_name in "${!required_vars[@]}"; do
         if [ -z "${!var_name}" ]; then
             echo "❌ error: ${required_vars[$var_name]}"
@@ -26,6 +32,34 @@ check_env_vars() {
         fi
     done
 
+    # Check variables from test.env files (static list of all variables found in test.env files)
+    echo "Checking test environment variables..."
+    local -a test_env_vars=(
+        "application_name"
+        "appstudio_component_branch"
+        "component_base_branch"
+        "component_branch"
+        "component_git_url"
+        "component_name"
+        "component_repo_name"
+        "component_type"
+        "managed_namespace"
+        "managed_sa_name"
+        "originating_tool"
+        "tenant_namespace"
+        "tenant_sa_name"
+    )
+    for var_name in "${test_env_vars[@]}"; do
+        # Check if variable is set
+        if [ -z "${!var_name}" ]; then
+            echo "❌ error: Missing test environment variable: $var_name"
+            missing_vars=$((missing_vars + 1))
+        else
+            echo "✅ $var_name is set"
+        fi
+    done
+
+    # Special file validation
     if [ -n "$VAULT_PASSWORD_FILE" ] && [ ! -f "$VAULT_PASSWORD_FILE" ]; then
         echo "❌ error: env var VAULT_PASSWORD_FILE points to a non-existent file: $VAULT_PASSWORD_FILE"
         missing_vars=$((missing_vars + 1))
@@ -38,7 +72,7 @@ check_env_vars() {
     if [ -n "$KUBECONFIG" ] ; then
       echo "Using provided KUBECONFIG"
     else
-      echo "⚠️ Warning: KUBECONFIG is not set. Assuming kubectl is configured correctly."
+      log_warning "KUBECONFIG is not set. Assuming kubectl is configured correctly."
     fi
     echo "Environment variable check complete."
 }
@@ -92,7 +126,7 @@ get_build_pipeline_run_url() { # args are ns, app, name
   console_url=${console_url%/}
 
   if [ -z "$console_url" ]; then
-      echo "⚠️ Warning: Could not retrieve custom-console-url. URL might be incomplete."
+      log_warning "Could not retrieve custom-console-url. URL might be incomplete."
       echo "kubectl get cm/pipelines-as-code -n openshift-pipelines -ojson" # Add command for easier debugging
       echo "${ns}/applications/${app}/pipelineruns/${name}" # Fallback or partial URL
   else
@@ -239,21 +273,54 @@ create_kubernetes_resources() {
 # Modifies global variables: component_pr, pr_number
 # Relies on global variables: component_name, tenant_namespace
 wait_for_component_initialization() {
-    echo -n "Waiting for component ${component_name} in namespace ${tenant_namespace} to be initialized: "
+    echo "Waiting for component ${component_name} in namespace ${tenant_namespace} to be initialized..."
+
+    local max_attempts=60  # 10 minutes with 10-second intervals
+    local attempt=1
     local component_annotations=""
-    while [ -z "${component_annotations}" ]; do
-      sleep 1
-      echo -n "."
+    local initialization_success=false
+
+    while [ $attempt -le $max_attempts ]; do
+      echo "Initialization check attempt ${attempt}/${max_attempts}..."
+
+      # Try to get component annotations
       component_annotations=$(kubectl get component/"${component_name}" -n "${tenant_namespace}" -ojson 2>/dev/null | \
         jq -r --arg k "build.appstudio.openshift.io/status" '.metadata.annotations[$k] // ""')
-    done
-    echo ""
-    echo "️✅️ Initialized."
 
-    # component_pr is made global by not declaring it local
-    component_pr=$(jq -r '.pac."merge-url" // ""' <<< "${component_annotations}")
-    if [ -z "${component_pr}" ]; then
-      log_error "Could not get component PR from annotations: ${component_annotations}"
+      if [ -n "${component_annotations}" ]; then
+        # component_pr is made global by not declaring it local
+        component_pr=$(jq -r '.pac."merge-url" // ""' <<< "${component_annotations}")
+        if [ -n "${component_pr}" ]; then
+            echo "✅ Component initialized successfully"
+            initialization_success=true
+            break
+        else
+            log_warning "Could not get component PR from annotations: ${component_annotations}"
+            echo "Requesting a new configure-pac..."
+            kubectl annotate components/${component_name} build.appstudio.openshift.io/request=configure-pac -n "${tenant_namespace}"
+            echo "Waiting 10 seconds before retry..."
+            sleep 10
+        fi
+
+      else
+        log_warning "Component not yet initialized (attempt ${attempt}/${max_attempts})"
+
+        # Wait before retrying (except on the last attempt)
+        if [ $attempt -lt $max_attempts ]; then
+          echo "Waiting 10 seconds before retry..."
+          sleep 10
+        fi
+      fi
+
+      attempt=$((attempt + 1))
+    done
+
+    # Check if initialization ultimately succeeded
+    if [ "$initialization_success" = false ]; then
+      echo "🔴 error: component ${component_name} failed to initialize after ${max_attempts} attempts ($(($max_attempts * 10 / 60)) minutes)"
+      echo "   - Component may not exist in namespace ${tenant_namespace}"
+      echo "   - Component creation may have failed"
+      exit 1
     fi
 
     # pr_number is made global by not declaring it local
@@ -279,16 +346,41 @@ merge_github_pr() {
     echo "Commit message: \"${commit_message}\""
 
     local merge_result
-    merge_result=$(curl -L \
-      -X PUT \
-      -H "Accept: application/vnd.github+json" \
-      -H "Authorization: Bearer $GITHUB_TOKEN" \
-      -H "X-GitHub-Api-Version: 2022-11-28" \
-      "https://api.github.com/repos/${component_repo_name}/pulls/${pr_number}/merge" \
-      -d "{\"commit_title\":\"e2e test\",\"commit_message\":\"${commit_message}\"}" --silent --show-error --fail-with-body)
+    local attempt=1
+    local max_attempts=3
+    local success=false
 
-    if [ $? -ne 0 ]; then
-        log_error "Failed to merge PR. Response: ${merge_result}"
+    # Retry loop for PR merge
+    while [ $attempt -le $max_attempts ] && [ "$success" = false ]; do
+        echo "Merge attempt ${attempt}/${max_attempts}..."
+
+        set +e
+        merge_result=$(curl -L \
+          -X PUT \
+          -H "Accept: application/vnd.github+json" \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          "https://api.github.com/repos/${component_repo_name}/pulls/${pr_number}/merge" \
+          -d "{\"commit_title\":\"e2e test\",\"commit_message\":\"${commit_message}\"}" --silent --show-error --fail-with-body)
+
+        if [ $? -eq 0 ]; then
+            success=true
+            echo "✅ PR merge succeeded on attempt ${attempt}"
+        else
+            echo "❌ PR merge failed on attempt ${attempt}. Response: ${merge_result}"
+            if [ $attempt -lt $max_attempts ]; then
+                echo "Waiting 5 seconds before retry..."
+                sleep 5
+            fi
+        fi
+        set -e
+        
+        attempt=$((attempt + 1))
+    done
+
+    # Check if all attempts failed
+    if [ "$success" = false ]; then
+        log_error "Failed to merge PR after ${max_attempts} attempts. Last response: ${merge_result}"
     fi
 
     # SHA is made global by not declaring it local
@@ -429,16 +521,18 @@ wait_for_releases() {
 # Function to clean up old resources based on originating tool label
 # Arguments:
 #   $1: originating_tool label value
-#   $2: age in minutes (optional, defaults to 7)
+#   $2: age in minutes (optional, defaults to 1440 or 24 hours)
 cleanup_old_resources() {
     local originating_tool="$1"
-    local age_minutes="${2:-7}"
+    local age_minutes="${2:-1440}"
 
     if [ -z "$originating_tool" ]; then
         echo "🔴 Error: originating_tool parameter is required"
         return 1
     fi
 
+    # disable exit on error to allow for cleanup of old resources
+    set +e
     # Create temporary file and ensure it's cleaned up on exit
     local temp_dir
     temp_dir=$(mktemp -d)
@@ -472,6 +566,8 @@ cleanup_old_resources() {
     else
         echo "No old resources found to clean up"
     fi
+    # re-enable exit on error
+    set -e
 }
 
 # Function to delete old branches from a GitHub repository
@@ -482,7 +578,8 @@ cleanup_old_resources() {
 #   - GITHUB_TOKEN environment variable must be set
 delete_old_branches() {
     local repo_name="$1"
-    local cutoff_days="${2:-1}"
+    local branch_prefix="$2"
+    local cutoff_days="${3:-1}"
 
     if [ -z "$repo_name" ]; then
         echo "🔴 Error: Repository name is required (format: owner/repo)"
@@ -502,5 +599,23 @@ delete_old_branches() {
     fi
 
     echo "🔍 Deleting branches in ${repo_name} older than ${cutoff_days} day(s)..."
-    CUTOFF_DATE="${cutoff_days} day" bash "$script_path" "$repo_name"
+    CUTOFF_DATE="${cutoff_days} day" bash "$script_path" "$repo_name" "$branch_prefix"
+}
+
+# Function to verify Release contents
+verify_release_contents() {
+    echo "📝 Note: Test Suite may implement ${FUNCNAME[0]}" \
+     "to verify Release contents in their test.sh file"
+}
+
+# Function to patch the component source BEFORE Component creation
+patch_component_source() {
+    echo "📝 Note: Test Suite may implement ${FUNCNAME[0]}" \
+     "to patch the component source BEFORE Component creation in their test.sh file"
+}
+
+# Function to patch the component source BEFORE MERGE
+patch_component_source_before_merge() {
+    echo "📝 Note: Test Suite may implement ${FUNCNAME[0]}" \
+     "to patch the component source BEFORE MERGE in their test.sh file"
 }

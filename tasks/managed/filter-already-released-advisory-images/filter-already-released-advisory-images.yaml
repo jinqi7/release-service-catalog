@@ -7,9 +7,19 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: |
-    Managed Tekton task that filters out already-released images from a snapshot
-    via an InternalRequest.
+  description: |-
+    This task filters out images from a snapshot that have already been published
+    in advisories. It is a **managed Tekton task** that triggers an **internal task**
+    using an InternalRequest, and overwrites the mapped snapshot file with a
+    filtered version containing only **unpublished images**.
+
+    The task also outputs a `skip_release` result, which is set to `true`
+    if all components are already released (and the pipeline can be skipped),
+    or `false` otherwise.
+
+    The task overwrites the original mapped snapshot file in place with a
+    filtered version containing only unpublished images.
+    Downstream tasks continue to use the same snapshot path.
   params:
     - name: snapshotPath
       type: string
@@ -21,16 +31,16 @@ spec:
       type: string
       description: Path to the results directory in the data workspace
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
       description: Expiration date for the trusted artifacts created in the
-        OCI repository. An empty string means the artifacts do not expire.
+        OCI repository. An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -58,10 +68,9 @@ spec:
       type: string
       description: Whether to wait for the InternalRequest completion
       default: "true"
-    - name: subdirectory
-      description: Subdirectory inside the workspace to be used
+    - name: dataPath
+      description: Path to the JSON string of the merged data to use in the data workspace
       type: string
-      default: ""
   workspaces:
     - name: data
       description: Workspace to mount internal request outputs
@@ -73,6 +82,9 @@ spec:
     - description: Produced trusted data artifact
       name: sourceDataArtifact
       type: string
+    - name: environment
+      type: string
+      description: The environment for the advisory to be published. Options are stage and production
   volumes:
     - name: workdir
       emptyDir: {}
@@ -207,9 +219,22 @@ spec:
         fi
 
         # Select the correct secret name
-        advisorySecretName="create-advisory-prod-secret"
         if [ "${foundPendingRepositories}" == "true" ]; then
           advisorySecretName="create-advisory-stage-secret"
+          printf "stage" | tee "$(results.environment.path)"
+        else
+          advisorySecretName="create-advisory-prod-secret"
+          printf "production" | tee "$(results.environment.path)"
+        fi
+
+        # Check if skipFilter is true in data.json
+        DATA_FILE="$(params.dataDir)/$(params.dataPath)"
+        if [ -f "$DATA_FILE" ] && [ "$(jq -r '.skipFilter' "$DATA_FILE")" = "true" ]; then
+          echo "skipFilter is true in data.json, skipping filtering and passing snapshot unchanged."
+          echo -n "false" > "$(results.skip_release.path)"
+          echo -n "Success" > "$(results.result.path)"
+          # Output the original snapshot unchanged (no filtering)
+          exit 0
         fi
 
         RESULTS_FILE="$(params.dataDir)/$(params.resultsDirPath)/filter-already-released-advisory-images-results.json"
@@ -252,38 +277,43 @@ spec:
           echo "Image filtering successful"
 
           # Get the unreleased components list
-          UNRELEASED_COMPONENTS=$(echo "$results" | jq -r '.unreleased_components // "[]"')
-          if [ -z "$UNRELEASED_COMPONENTS" ]; then
+          UNRELEASED_COMPONENTS_RAW=$(echo "$results" | jq -r '.unreleased_components // ""')
+          if [ -z "$UNRELEASED_COMPONENTS_RAW" ]; then
             echo "No unreleased components list found in results. Results:"
             echo "$results"
             exit 1
           fi
 
+          UNRELEASED_COMPONENTS=$(mktemp)
+          FILTERED_SNAPSHOT=$(mktemp)
+
+          echo "$UNRELEASED_COMPONENTS_RAW" | base64 -d | gunzip | tee "$UNRELEASED_COMPONENTS"
+
           # Filter the original snapshot using the unreleased components list
-          FILTERED_SNAPSHOT=$(jq --argjson unreleased "$UNRELEASED_COMPONENTS" '
+          jq --slurpfile unreleased "$UNRELEASED_COMPONENTS" '
             .components = (
               .components | map(
                 select(
-                  .name as $name | ($unreleased | contains([$name]))
+                  .name as $name | ($unreleased[0] | contains([$name]))
                 )
               )
             )
-          ' < "$SNAPSHOT_FILE")
+          ' "$SNAPSHOT_FILE" > "$FILTERED_SNAPSHOT"
 
           # Check if the filtered snapshot has any components
-          if jq -e '.components | length == 0' <<< "$FILTERED_SNAPSHOT"; then
+          if jq -e '.components | length == 0' < "$FILTERED_SNAPSHOT"; then
             echo "All images in the snapshot have already been released in advisories. Stopping pipeline."
-            echo "$FILTERED_SNAPSHOT" > "$SNAPSHOT_FILE"
+            cat "$FILTERED_SNAPSHOT" > "$SNAPSHOT_FILE"
             echo -n "Success" > "$(results.result.path)"
             echo -n "true" > "$(results.skip_release.path)"
-            jq -n --arg snapshot "$FILTERED_SNAPSHOT" '{"filtered_snapshot": $snapshot}' | tee "$RESULTS_FILE"
+            jq -n --rawfile snapshot "$FILTERED_SNAPSHOT" '{"filtered_snapshot": $snapshot}' | tee "$RESULTS_FILE"
             exit 0
           fi
 
-          echo "$FILTERED_SNAPSHOT" > "$SNAPSHOT_FILE"
+          cat "$FILTERED_SNAPSHOT" > "$SNAPSHOT_FILE"
           echo -n "Success" > "$(results.result.path)"
           echo -n "false" > "$(results.skip_release.path)"
-          jq -n --arg snapshot "$FILTERED_SNAPSHOT" '{"filtered_snapshot": $snapshot}' | tee "$RESULTS_FILE"
+          jq -n --rawfile snapshot "$FILTERED_SNAPSHOT" '{"filtered_snapshot": $snapshot}' | tee "$RESULTS_FILE"
         else
           echo "Filtering failed. Results:"
           echo "$results"

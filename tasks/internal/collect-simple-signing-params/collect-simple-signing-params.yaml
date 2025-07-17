@@ -6,6 +6,8 @@ metadata:
   annotations:
     tekton.dev/tags: release
 spec:
+  description: |-
+    Task to collect parameters for the simple signing pipeline
   params:
     - name: config_map_name
       description: Name of a configmap with pipeline configuration

@@ -7,8 +7,11 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    Tekton task to create an advisory via an InternalRequest
+  description: |-
+    Tekton task to create an advisory via an InternalRequest. The advisory data is pulled from the data JSON. The origin
+    workspace from the ReleasePlanAdmission and Application from the Snapshot are also used. The advisory is created in
+    a GitLab repository. Which repository to use is determined by the contents on the mapped repositories.
+    Only all `redhat-pending` or all `redhat-prod` repositories may be specified in `.data.mapping`
   params:
     - name: jsonKey
       type: string
@@ -23,6 +26,9 @@ spec:
     - name: dataPath
       type: string
       description: Path to the data JSON in the data workspace
+    - name: environment
+      type: string
+      description: The environment for the advisory to be published. Options are stage and production
     - name: resultsDirPath
       type: string
       description: Path to the results directory in the data workspace
@@ -38,16 +44,16 @@ spec:
       type: string
       description: The uid of the current pipelineRun. Used as a label value when creating internal requests
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
       description: Expiration date for the trusted artifacts created in the
-        OCI repository. An empty string means the artifacts do not expire.
+        OCI repository. An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -340,59 +346,9 @@ spec:
         stagingErrataSecretName="errata-stage-service-account"
 
         if [ "$content_type" = "image" ]; then
-
-          #
-          # detect which one to use based on repositories specified
-          #
-          pending_repositories=$(jq -r '.components[] | select(.repository |
-            contains("quay.io/redhat-pending/")) |
-            .repository' "$(params.dataDir)/$(params.snapshotPath)")
-          prod_repositories=$(jq -r '.components[] | select(.repository | contains("quay.io/redhat-prod/")) |
-            .repository' "$(params.dataDir)/$(params.snapshotPath)")
-          orphan_repositories=$(jq -r '.components[] | select(.repository | contains("quay.io/redhat-prod/") |
-            not) | select(.repository | contains("quay.io/redhat-pending/") | not) |
-            .repository' "$(params.dataDir)/$(params.snapshotPath)")
-
-          foundPendingRepositories=false
-          if [ -n "${pending_repositories}" ]; then
-            foundPendingRepositories=true
-          fi
-
-          foundProdRepositories=false
-          if [ -n "${prod_repositories}" ]; then
-            foundProdRepositories=true
-          fi
-
-          foundOrphanRepositories=false
-          if [ -n "${orphan_repositories}" ]; then
-            foundOrphanRepositories=true
-          fi
-
-          echo "foundPendingRepositories: ${foundPendingRepositories}"
-          echo "foundProdRepositories: ${foundProdRepositories}"
-          echo "foundOrphanRepositories: ${foundOrphanRepositories}"
-
-          if [ "${foundPendingRepositories}" == "true" ] && [ "${foundProdRepositories}" == "true" ]; then
-            echo "Error: cannot publish to both redhat-pending and redhat-prod repositories"
-            exit 1
-          fi
-
-          if [ "${foundPendingRepositories}" == "false" ] && [ "${foundProdRepositories}" == "false" ]; then
-            echo "Error: you must publish to either redhat-pending or redhat-prod repositories"
-            exit 1
-          fi
-
-          if [ "${foundOrphanRepositories}" == "true" ]; then
-            echo "Error: you must publish to either redhat-pending or redhat-prod repositories"
-            exit 1
-          fi
-
-          # at this point, one of foundPendingRepositories or foundProdRepositories
-          # is true.
-
           advisorySecretName="${prodSecretName}"
           errataSecretName="${prodErrataSecretName}"
-          if [ "${foundPendingRepositories}" == "true" ]; then
+          if [ "$(params.environment)" == "stage" ]; then
             advisorySecretName="${stagingSecretName}"
             errataSecretName="${stagingErrataSecretName}"
           fi
@@ -419,11 +375,12 @@ spec:
         IR_FILE="$(params.dataDir)/$(context.task.name)/ir-result.txt"
         mkdir -p "$(dirname "$IR_FILE")"
 
+        advisoryDataCompressed=$(gzip <<< "${advisoryData}" | base64 -w0)
         echo "Creating InternalRequest to create advisory..."
         internal-request --pipeline "$(params.request)" \
                          -p application="${application}" \
                          -p origin="${origin}" \
-                         -p advisory_json="${advisoryData}" \
+                         -p advisory_json="${advisoryDataCompressed}" \
                          -p config_map_name="${configMapName}" \
                          -p contentType="${content_type}" \
                          -p advisory_secret_name="${advisorySecretName}" \
@@ -431,6 +388,8 @@ spec:
                          -p taskGitUrl="$(params.taskGitUrl)" \
                          -p taskGitRevision="$(params.taskGitRevision)" \
                          -s "$(params.synchronously)" \
+                         --pipeline-timeout "01h05m00s" \
+                         --task-timeout "01h00m00s" \
                          -l ${pipelinerun_label}="$(params.pipelineRunUid)" \
                          | tee "$IR_FILE" || \
                          (grep "^\[" "$IR_FILE" | jq . && exit 1)

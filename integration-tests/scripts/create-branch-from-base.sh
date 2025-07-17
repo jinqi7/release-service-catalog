@@ -50,3 +50,57 @@ echo "Current SHA for base branch $base_branch_name is  $SHA"
 echo "Creating new branch called ${new_branch_name} based on branch $base_branch_name"
 curl -X POST -H "Authorization: token $GITHUB_TOKEN" \
  -d  "{\"ref\": \"refs/heads/${new_branch_name}\",\"sha\": \"$SHA\"}"  https://api.github.com/repos/${repo_name}/git/refs 2> /dev/null
+
+# Verify the branch exists and is pullable with retry logic
+echo "Verifying that branch ${new_branch_name} exists and is pullable..."
+
+max_attempts=5
+attempt=1
+verification_success=false
+
+while [ $attempt -le $max_attempts ]; do
+  echo "Verification attempt ${attempt}/${max_attempts}..."
+  
+  # Check if the branch exists by getting its ref
+  NEW_BRANCH_SHA=$(curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/${repo_name}/git/refs/heads/${new_branch_name} 2> /dev/null | jq -r '.object.sha // ""')
+  
+  if [ -n "${NEW_BRANCH_SHA}" ]; then
+    # Verify the SHA matches what we expected
+    if [ "${NEW_BRANCH_SHA}" = "${SHA}" ]; then
+      # Test if the branch is pullable by attempting to get its info
+      BRANCH_INFO=$(curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/${repo_name}/branches/${new_branch_name} 2> /dev/null)
+      BRANCH_EXISTS=$(echo "$BRANCH_INFO" | jq -r '.name // ""')
+      
+      if [ "${BRANCH_EXISTS}" = "${new_branch_name}" ]; then
+        echo "✅ Branch ${new_branch_name} successfully created and is pullable"
+        echo "   - SHA: ${NEW_BRANCH_SHA}"
+        echo "   - Based on: ${base_branch_name}"
+        echo "   - Verified on attempt: ${attempt}"
+        verification_success=true
+        break
+      else
+        echo "⚠️  Branch ${new_branch_name} exists but is not yet pullable (attempt ${attempt}/${max_attempts})"
+      fi
+    else
+      echo "⚠️  Branch ${new_branch_name} SHA (${NEW_BRANCH_SHA}) does not match expected SHA (${SHA}) (attempt ${attempt}/${max_attempts})"
+    fi
+  else
+    echo "⚠️  Branch ${new_branch_name} does not exist yet (attempt ${attempt}/${max_attempts})"
+  fi
+  
+  # Wait before retrying (except on the last attempt)
+  if [ $attempt -lt $max_attempts ]; then
+    echo "Waiting 3 seconds before retry..."
+    sleep 3
+  fi
+  
+  attempt=$((attempt + 1))
+done
+
+# Check if verification ultimately succeeded
+if [ "$verification_success" = false ]; then
+  echo "🔴 error: branch ${new_branch_name} verification failed after ${max_attempts} attempts"
+  echo "   - Branch may not have been created successfully"
+  echo "   - Branch may not be pullable or accessible"
+  exit 1
+fi

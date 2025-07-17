@@ -7,15 +7,12 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
+  description: |-
     Publish a built FBC index image using skopeo
   params:
     - name: dataPath
       description: Path to the JSON string of the merged data to use in the data workspace
       type: string
-    - name: sourceIndex
-      type: string
-      description: Pullspec to pull the image from
     - name: targetIndex
       type: string
       description: Pullspec to push the image to
@@ -37,7 +34,7 @@ spec:
       type: string
       description: The uid of the current pipelineRun. Used as a label value when creating internal requests
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
@@ -46,7 +43,7 @@ spec:
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -162,7 +159,7 @@ spec:
             '.components[$i].target_index' "$(params.dataDir)/$(params.internalRequestResultsFile)")
 
           sourceIndex=$(jq -r  --argjson i "$i" \
-            '.components[$i].index_image_resolved' "$(params.dataDir)/$(params.internalRequestResultsFile)")
+            '.components[$i].index_image' "$(params.dataDir)/$(params.internalRequestResultsFile)")
 
           buildTimestamp=$(jq -r --argjson i "$i" '.components[$i].completion_time' \
             "$(params.dataDir)/$(params.internalRequestResultsFile)")
@@ -172,6 +169,11 @@ spec:
           if [[ ! "$targetIndex" =~ .*"$buildTimestamp"$ ]]; then
             publishingImages+=("${targetIndex}-${buildTimestamp}")
           fi
+
+          requestTimeout=$(params.requestTimeout)
+          pipelineTimeoutSeconds=$((requestTimeout+300))
+          pipelineTimeout=$(date -u -d @"${pipelineTimeoutSeconds}" +"%Hh%Mm%Ss")
+          taskTimeout=$(date -u -d @"${requestTimeout}" +"%Hh%Mm%Ss")
 
           for((x=0; x<${#publishingImages[@]}; x++ )); do
               echo "=== Creating internal request to publish image:"
@@ -187,6 +189,8 @@ spec:
                   -p taskGitUrl="$(params.taskGitUrl)" \
                   -p taskGitRevision="$(params.taskGitRevision)" \
                   -t "$(params.requestTimeout)" \
+                  --pipeline-timeout "${pipelineTimeout}" \
+                  --task-timeout "$taskTimeout" \
                   -l ${pipelinerun_label}="$(params.pipelineRunUid)"
               echo "=== done"
               echo ""

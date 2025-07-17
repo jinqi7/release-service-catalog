@@ -8,9 +8,9 @@ Tekton task to push snapshot images to an image registry using `cosign copy`.
 |-------------------------|----------------------------------------------------------------------------------------------------------------------------|----------|-------------------------|
 | snapshotPath            | Path to the JSON string of the mapped Snapshot spec in the data workspace                                                  | No       | -                       |
 | dataPath                | Path to the JSON string of the merged data to use in the data workspace                                                    | No       | -                       |
-| resultsDirPath          | Path to results directory in the data workspace                                                                            | No       | -                       |
-| retries                 | Retry copy N times                                                                                                         | Yes      | 3                       |
+| resultsDirPath          | Path to the results directory in the data workspace                                                                        | No       | -                       |
 | concurrentLimit         | The maximum number of images to be proccessed concurrently                                                                 | Yes      | 10                      |
+| retries                 | Retry copy N times                                                                                                         | Yes      | 3                       |
 | caTrustConfigMapName    | The name of the ConfigMap to read CA bundle data from                                                                      | Yes      | trusted-ca              |
 | caTrustConfigMapKey     | The name of the key in the ConfigMap that contains the CA bundle data                                                      | Yes      | ca-bundle.crt           |
 | ociStorage              | The OCI repository where the Trusted Artifacts are stored                                                                  | Yes      | empty                   |
@@ -19,5 +19,5 @@ Tekton task to push snapshot images to an image registry using `cosign copy`.
 | orasOptions             | oras options to pass to Trusted Artifacts calls                                                                            | Yes      | ""                      |
 | sourceDataArtifact      | Location of trusted artifacts to be used to populate data directory                                                        | Yes      | ""                      |
 | dataDir                 | The location where data will be stored                                                                                     | Yes      | $(workspaces.data.path) |
-| taskGitUrl              | The url to the git repo where the release-service-catalog tasks and stepactions to be used are stored                      | No       | ""                      |
-| taskGitRevision         | The revision in the taskGitUrl repo to be used                                                                             | No       | ""                      |
+| taskGitUrl              | The url to the git repo where the release-service-catalog tasks and stepactions to be used are stored                      | No       | -                       |
+| taskGitRevision         | The revision in the taskGitUrl repo to be used                                                                             | No       | -                       |

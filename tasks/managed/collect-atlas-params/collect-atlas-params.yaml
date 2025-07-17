@@ -7,24 +7,28 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    Tekton task that collects Atlas API configuration options from the data file.
+  description: |-
+    Tekton task that collects the Atlas server option from the data file. Based on
+    the value of the "atlas.server" field ("stage" or "production"), outputs results
+    used to push SBOMs to Atlas. Also outputs results used to push SBOMs to an S3
+    bucket. If no Atlas fields are present in the data file, it outputs empty
+    strings as results, indicating that the Atlas push should be skipped.
   params:
     - name: dataPath
       type: string
       description: |
-        Path to the JSON string of the merged data containing the Atlas config.
+        Path to the JSON string of the merged data containing the Atlas config
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
       description: Expiration date for the trusted artifacts created in the
-        OCI repository. An empty string means the artifacts do not expire.
+        OCI repository. An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions

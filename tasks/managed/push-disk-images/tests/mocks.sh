@@ -5,14 +5,14 @@ set -ex
 
 function internal-request() {
   echo Mock internal-request called with: $*
-  echo $* >> $(workspaces.data.path)/mock_internal-request.txt
+  echo $* >> $(params.dataDir)/mock_internal-request.txt
 
   /home/utils/internal-request "$@" -s false
 
   if [[ "$*" == *'snapshot_json={"application":"disk-images","components":[{"name":"failing-disk-image"'* ]]; then
-      echo '{"result":"Failure"}' > $(workspaces.data.path)/mock_internal-request_result.txt
+      echo '{"result":"Failure"}' > $(params.dataDir)/mock_internal-request_result.txt
   elif [[ "$*" == *"exodusGwEnv="@(live|pre)* ]]; then
-      echo '{"result":"Success"}' > $(workspaces.data.path)/mock_internal-request_result.txt
+      echo '{"result":"Success"}' > $(params.dataDir)/mock_internal-request_result.txt
   else
       echo Unexpected call to internal-request
       exit 1
@@ -23,7 +23,7 @@ function kubectl() {
   # The IR won't actually be acted upon, so mock it to return Success as the task wants
   if [[ "$*" == "get internalrequest "*"-o=jsonpath={.status.results}" ]]
   then
-    cat $(workspaces.data.path)/mock_internal-request_result.txt
+    cat $(params.dataDir)/mock_internal-request_result.txt
   else
     /usr/bin/kubectl $*
   fi

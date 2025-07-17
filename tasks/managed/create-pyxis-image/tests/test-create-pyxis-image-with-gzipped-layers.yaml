@@ -58,7 +58,7 @@ spec:
               value: "$(params.trustedArtifactsDebug)"
         steps:
           - name: setup-values
-            image: quay.io/konflux-ci/release-service-utils:be3ad8aff2267f2b8caf475d1a5759980389aa1c
+            image: quay.io/konflux-ci/release-service-utils:ea7868ebdcc7a2116c620255034226611d837f42
             script: |
               #!/usr/bin/env bash
               set -eux
@@ -197,7 +197,7 @@ spec:
               - name: sourceDataArtifact
                 value: $(params.sourceDataArtifact)
           - name: check-result
-            image: quay.io/konflux-ci/release-service-utils:be3ad8aff2267f2b8caf475d1a5759980389aa1c
+            image: quay.io/konflux-ci/release-service-utils:ea7868ebdcc7a2116c620255034226611d837f42
             script: |
               #!/usr/bin/env bash
               set -eux
@@ -220,9 +220,9 @@ spec:
 
               # check that the size of the decompressed layers is as expected
               jq -e '.uncompressed_layers[0].size == 21' \
-                "$(params.dataDir)/$(context.pipelineRun.uid)/oras-manifest-fetch.json"
+                "$(params.dataDir)/$(context.pipelineRun.uid)/oras-manifest-fetch-0-0.json"
               jq -e '.uncompressed_layers[1].size == 9' \
-                "$(params.dataDir)/$(context.pipelineRun.uid)/oras-manifest-fetch.json"
+                "$(params.dataDir)/$(context.pipelineRun.uid)/oras-manifest-fetch-0-0.json"
 
       runAfter:
         - run-task

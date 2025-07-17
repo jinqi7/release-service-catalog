@@ -7,7 +7,23 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
+  description: |-
+    Tekton task that publishes the maven artifacts to MRRC(maven.repository.redhat.com)
+    service. MRRC is used to host maven artifacts of Red Hat Middleware products.
+    This task will work with [collect-mrrc-task](../collect-mrrc-params/README.md)
+    together to do the MRRC publishment work.
+    It accepts the `mrrc.env` file from the
+    [collect-mrrc-task](../collect-mrrc-params/README.md)
+    and use the variables in it as parameters for the MRRC publishing task.
   params:
+    - name: caTrustConfigMapName
+      type: string
+      description: The name of the ConfigMap to read CA bundle data from
+      default: trusted-ca
+    - name: caTrustConfigMapKey
+      type: string
+      description: The name of the key in the ConfigMap that contains the CA bundle data
+      default: ca-bundle.crt
     - name: mrrcParamFilePath
       description: path of the env file for mrrc parameters to use
       type: string
@@ -17,7 +33,126 @@ spec:
     - name: charonAWSSecret
       description: the secret name for charon aws credential file
       type: string
+    - name: ociStorage
+      description: The OCI repository where the Trusted Artifacts are stored
+      type: string
+      default: "empty"
+    - name: ociArtifactExpiresAfter
+      description: Expiration date for the trusted artifacts created in the
+        OCI repository. An empty string means the artifacts do not expire
+      type: string
+      default: "1d"
+    - name: trustedArtifactsDebug
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
+      type: string
+      default: ""
+    - name: orasOptions
+      description: oras options to pass to Trusted Artifacts calls
+      type: string
+      default: ""
+    - name: sourceDataArtifact
+      type: string
+      description: Location of trusted artifacts to be used to populate data directory
+      default: ""
+    - name: dataDir
+      description: The location where data will be stored
+      type: string
+      default: $(workspaces.data.path)
+    - name: taskGitUrl
+      type: string
+      description: The url to the git repo where the release-service-catalog tasks and stepactions to be used are stored
+    - name: taskGitRevision
+      type: string
+      description: The revision in the taskGitUrl repo to be used
+    - name: charonSignCASecret
+      description: the secret name for ca files for radas signing
+      type: string
+  workspaces:
+    - name: data
+      description: The workspace where the extra config file containing the mapping and snapshot json reside
+  results:
+    - name: sourceDataArtifact
+      type: string
+      description: Produced trusted data artifact
+  volumes:
+    - name: "charon-aws-vol"
+      secret:
+        secretName: "$(params.charonAWSSecret)"
+    - name: mrrc-workdir
+      emptyDir: {}
+    - name: workdir
+      emptyDir: {}
+    - name: "charon-signca-vol"
+      secret:
+        secretName: "$(params.charonSignCASecret)"
+    - name: trusted-ca
+      configMap:
+        name: $(params.caTrustConfigMapName)
+        items:
+          - key: $(params.caTrustConfigMapKey)
+            path: ca-bundle.crt
+        optional: true
+  stepTemplate:
+    volumeMounts:
+      - mountPath: /var/workdir
+        name: workdir
+    env:
+      - name: IMAGE_EXPIRES_AFTER
+        value: $(params.ociArtifactExpiresAfter)
+      - name: "ORAS_OPTIONS"
+        value: "$(params.orasOptions)"
+      - name: "DEBUG"
+        value: "$(params.trustedArtifactsDebug)"
+    # This is a workaround for a problem observed on Konflux clusters where the
+    # a step runs with root user causing a file or folder to not be readable
+    # in later steps. There might be solution coming related to the
+    # security context constraints on the cluster, but setting this explicitly here
+    # should probably be harmless either way.
+    securityContext:
+      runAsUser: 1001
   steps:
+    - name: skip-trusted-artifact-operations
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 20m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/skip-trusted-artifact-operations/skip-trusted-artifact-operations.yaml
+      params:
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: workDir
+          value: $(params.dataDir)
+    - name: use-trusted-artifact
+      computeResources:
+        limits:
+          memory: 64Mi
+        requests:
+          memory: 64Mi
+          cpu: 30m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/use-trusted-artifact/use-trusted-artifact.yaml
+      params:
+        - name: workDir
+          value: $(params.dataDir)
+        - name: sourceDataArtifact
+          value: $(params.sourceDataArtifact)
     - name: prepare-repo
       image: quay.io/konflux-ci/release-service-utils:28fca729e118024bd0f1bd8db4f2651a130ef152
       computeResources:
@@ -30,7 +165,7 @@ spec:
         #!/usr/bin/env bash
         set -eux
 
-        MRRC_FILE="$(workspaces.data.path)/$(params.mrrcParamFilePath)"
+        MRRC_FILE="$(params.dataDir)/$(params.mrrcParamFilePath)"
         # shellcheck source=/dev/null
         . "$MRRC_FILE"
         mkdir -p /workdir/mrrc
@@ -42,14 +177,18 @@ spec:
           echo "Downloading the maven repo zip $r"
           SOURCE_REPO=${r%%@sha256:*}
           AUTH_FILE=$(mktemp)
+          hash=${r##*@sha256:}
+          short_hash=${hash:0:6}
+          repodir="/workdir/mrrc/$short_hash"
+          mkdir -p "$repodir"
           select-oci-auth "${SOURCE_REPO}" > "$AUTH_FILE"
-          oras pull --registry-config "$AUTH_FILE" "$r" -o /workdir/mrrc
+          oras pull --registry-config "$AUTH_FILE" "$r" -o "$repodir"
         done
       volumeMounts:
-        - name: workdir
+        - name: mrrc-workdir
           mountPath: "/workdir"
     - name: upload-maven-repo
-      image: quay.io/konflux-ci/charon@sha256:95b22f4f0fc1d6bb984a2f63334c3f66a539e433d79cde4eafa7731d8924377f
+      image: quay.io/konflux-ci/charon@sha256:0d0e4a02e8c54fcc54bc359e960e0610c184f452d74b85bd8b2e95064ba1a119
       computeResources:
         limits:
           memory: 512Mi
@@ -60,11 +199,11 @@ spec:
         #!/usr/bin/env bash
         set -eux
 
-        CHARON_CFG_FILE="$(workspaces.data.path)/$(params.charonConfigFilePath)"
+        CHARON_CFG_FILE="$(params.dataDir)/$(params.charonConfigFilePath)"
         mkdir -p "/home/charon/.charon"
         cp "$CHARON_CFG_FILE" /home/charon/.charon/charon.yaml
 
-        MRRC_FILE="$(workspaces.data.path)/$(params.mrrcParamFilePath)"
+        MRRC_FILE="$(params.dataDir)/$(params.mrrcParamFilePath)"
         # shellcheck source=/dev/null
         . "$MRRC_FILE"
 
@@ -72,24 +211,86 @@ spec:
         productName=$MRRC_PRODUCT_NAME
         productVersion=$MRRC_PRODUCT_VERSION
 
-        work_dir="/workdir/mrrc"
-        # Disable shell check sc2012 as find command is not installed
-        # shellcheck disable=SC2012
-        for r in $(ls "$work_dir"/*.zip | cat)
+        IFS='%' read -ra ADDR <<< "$MRRC_ZIP_REGISTRY"
+        for registry in "${ADDR[@]}"
         do
-          echo "Release $r with $productName-$productVersion into $target"
-          charon upload -p "$productName" -v "$productVersion" -t "$target" "$r"
+          echo "Release $registry with $productName-$productVersion into $target"
+          hash=${registry##*@sha256:}
+          short_hash=${hash:0:6}
+          repodir="/workdir/mrrc/$short_hash"
+
+          # start signing of the maven artifacts in maven zip
+          charon sign -r "$MRRC_AUTHOR" -p "$repodir" -k "$MRRC_SIGN_KEY" "$registry"
+
+          repo_zips=("$repodir"/*.zip)
+          repo_zip=${repo_zips[0]}
+          if [[ "$repo_zip" == "$repodir/*.zip" ]]
+          then
+            echo "No maven repository zip file found, will not publish."
+            exit 1
+          fi
+          sign_files=("$repodir"/*.json)
+          sign_file=${sign_files[0]}
+          if [[ "$sign_file" == "$repodir/*.json" ]]
+          then
+            echo "No signature result received from radas, will not publish."
+            exit 1
+          fi
+          echo "Release $repo_zip with $productName-$productVersion into $target"
+          charon upload -p "$productName" -v "$productVersion" -t "$target" -l "$sign_file" "$repo_zip"
         done
       volumeMounts:
         - name: "charon-aws-vol"
           mountPath: "/home/charon/.aws"
-        - name: workdir
+        - name: mrrc-workdir
           mountPath: "/workdir"
-  volumes:
-    - name: "charon-aws-vol"
-      secret:
-        secretName: "$(params.charonAWSSecret)"
-    - name: workdir
-      emptyDir: {}
-  workspaces:
-    - name: data
+        - name: "charon-signca-vol"
+          mountPath: "/home/charon/radasca"
+        - name: trusted-ca
+          mountPath: /etc/ssl/certs/ca-custom-bundle.crt
+          subPath: ca-bundle.crt
+          readOnly: true
+    - name: create-trusted-artifact
+      computeResources:
+        limits:
+          memory: 128Mi
+        requests:
+          memory: 128Mi
+          cpu: 250m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/create-trusted-artifact/create-trusted-artifact.yaml
+      params:
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: workDir
+          value: $(params.dataDir)
+        - name: sourceDataArtifact
+          value: $(results.sourceDataArtifact.path)
+    - name: patch-source-data-artifact-result
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 20m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/patch-source-data-artifact-result/patch-source-data-artifact-result.yaml
+      params:
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: sourceDataArtifact
+          value: $(results.sourceDataArtifact.path)

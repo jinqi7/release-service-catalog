@@ -7,8 +7,21 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    Task to create an internalrequest to sign a FBC Index Image.
+  description: |-
+    Creates an InternalRequest to sign an index image
+    
+    ## Signing data parameters
+    
+     The signing configuration should be set as `data.sign` in the _releasePlanAdmission_. Previously it used to be
+     set also in the `data.fbc`. The data should be set in the _ReleasePlanAdmission_ as follows:
+    
+    ```
+    data:
+        sign:
+            request: <signing pipeline name>
+            pipelineImage: <image pullspec>
+            configMapName: <configmap name>
+    ```
   params:
     - name: dataPath
       description: Path to the JSON string of the merged data to use in the data workspace
@@ -18,7 +31,7 @@ spec:
       type: string
     - name: referenceImage
       type: string
-      description: The image to be signed.
+      description: The image to be signed
     - name: manifestListDigests
       type: string
       description: The manifest digests for each arch in manifest list
@@ -40,7 +53,7 @@ spec:
       description: The maximum number of concurrent signing requests
       default: 16
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
@@ -49,7 +62,7 @@ spec:
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -72,7 +85,7 @@ spec:
       description: The revision in the taskGitUrl repo to be used
     - name: pyxisServer
       type: string
-      description: The server type to use. Options are 'production','production-internal,'stage-internal' and 'stage'.
+      description: The server type to use. Options are 'production','production-internal,'stage-internal' and 'stage'
       default: production
     - name: pyxisSecret
       type: string

@@ -236,6 +236,8 @@ spec:
           value: "$(context.pipelineRun.uid)/test_snapshot_spec.json"
         - name: dataPath
           value: "$(context.pipelineRun.uid)/data.json"
+        - name: environment
+          value: stage
         - name: resultsDirPath
           value: "$(context.pipelineRun.uid)/results"
         - name: synchronously
@@ -337,7 +339,7 @@ spec:
                 exit 1
               fi
 
-              advisoryJson=$(echo "$internalRequest" | jq -r '.spec.params.advisory_json')
+              advisoryJson=$(echo "$internalRequest" | jq -r '.spec.params.advisory_json' | base64 -d | gunzip -c)
 
               # Parse advisory_json content
               artifacts=$(echo "$advisoryJson" | jq -c '.content.artifacts')

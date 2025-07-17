@@ -64,6 +64,9 @@ spec:
               }
               EOF
               # Note: No snapshot file created
+              cat > "$(params.dataDir)/$(context.pipelineRun.uid)/data.json" <<EOF
+              {}
+              EOF
           - name: skip-trusted-artifact-operations
             ref:
               name: skip-trusted-artifact-operations
@@ -110,8 +113,6 @@ spec:
           value: "false"
         - name: pipelineRunUid
           value: $(context.pipelineRun.uid)
-        - name: subdirectory
-          value: $(context.pipelineRun.uid)
         - name: taskGitUrl
           value: "http://localhost"
         - name: taskGitRevision
@@ -126,6 +127,8 @@ spec:
           value: "$(tasks.setup.results.sourceDataArtifact)=$(params.dataDir)/$(context.pipelineRun.uid)"
         - name: dataDir
           value: $(params.dataDir)
+        - name: dataPath
+          value: "$(context.pipelineRun.uid)/data.json"
       workspaces:
         - name: data
           workspace: tests-workspace

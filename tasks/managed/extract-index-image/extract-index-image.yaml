@@ -7,11 +7,15 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-      Extract the index image fields from the inputDataFile
+  description: |-
+    Extract the index image fields from the inputDataFile
+    
+    The inputDataFile is a result from another task which includes the workspace name in it. Thus,
+    the workspace name for this task *must* be input.
   params:
     - name: inputDataFile
       type: string
+      description: Result from another task which includes the workspace name in it
     - name: resultsDirPath
       type: string
       description: Path to the results directory in the data workspace
@@ -19,7 +23,7 @@ spec:
       type: string
       description: Path to the results file of the InternalRequest build result
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
@@ -28,7 +32,7 @@ spec:
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions

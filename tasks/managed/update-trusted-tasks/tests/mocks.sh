@@ -4,7 +4,7 @@ set -eux
 # mocks to be injected into task step scripts
 function skopeo() {
   echo Mock skopeo called with: $* >&2
-  echo $* >> $(workspaces.data.path)/mock_skopeo.txt
+  echo $* >> "$(params.dataDir)/mock_skopeo.txt"
 
   if [[ "$*" =~ list-tags\ docker://quay.io/exists ]]; then
       echo '{"Tags": ["v2.0.0-3", "latest", "v2.0.0-2"]}'
@@ -20,7 +20,7 @@ function skopeo() {
 
 function ec() {
   echo Mock ec called with: $* >&2
-  echo $* >> $(workspaces.data.path)/mock_ec.txt
+  echo $* >> "$(params.dataDir)/mock_ec.txt"
 
   if [[ "$*" =~ "track bundle".*fail-image.* ]]; then
       exit 1

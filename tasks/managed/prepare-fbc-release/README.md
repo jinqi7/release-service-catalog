@@ -19,5 +19,5 @@ to each component, so other task can use them.
 | orasOptions             | oras options to pass to Trusted Artifacts calls                                                                            | Yes      | ""                      |
 | sourceDataArtifact      | Location of trusted artifacts to be used to populate data directory                                                        | Yes      | ""                      |
 | dataDir                 | The location where data will be stored                                                                                     | Yes      | $(workspaces.data.path) |
-| taskGitUrl              | The url to the git repo where the release-service-catalog tasks and stepactions to be used are stored                      | No       | ""                      |
-| taskGitRevision         | The revision in the taskGitUrl repo to be used                                                                             | No       | ""                      |
+| taskGitUrl              | The url to the git repo where the release-service-catalog tasks and stepactions to be used are stored                      | No       | -                       |
+| taskGitRevision         | The revision in the taskGitUrl repo to be used                                                                             | No       | -                       |

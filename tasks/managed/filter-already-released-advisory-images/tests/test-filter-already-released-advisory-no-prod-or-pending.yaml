@@ -94,6 +94,10 @@ spec:
                 ]
               }
               EOF
+
+              cat > "$(params.dataDir)/$(context.pipelineRun.uid)/data.json" <<EOF
+              {}
+              EOF
           - name: skip-trusted-artifact-operations
             ref:
               name: skip-trusted-artifact-operations
@@ -141,8 +145,6 @@ spec:
           value: "main"
         - name: pipelineRunUid
           value: $(context.pipelineRun.uid)
-        - name: subdirectory
-          value: $(context.pipelineRun.uid)
         - name: ociStorage
           value: $(params.ociStorage)
         - name: orasOptions
@@ -153,6 +155,8 @@ spec:
           value: "$(tasks.setup.results.sourceDataArtifact)=$(params.dataDir)/$(context.pipelineRun.uid)"
         - name: dataDir
           value: $(params.dataDir)
+        - name: dataPath
+          value: "$(context.pipelineRun.uid)/data.json"
       runAfter:
         - setup
       workspaces:

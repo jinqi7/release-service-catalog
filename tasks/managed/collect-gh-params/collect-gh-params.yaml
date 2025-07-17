@@ -7,8 +7,10 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    Tekton task that collects GitHub configuration options from the data file
+  description: |-
+    Tekton task that collects the three parameters to pass to the `create-github-release` task. The `githubSecret` from
+    the Data file, the `repository` from the snapshot file, and the `release_version` from the binaries of the
+    `extract-binaries-from-image` task.
   params:
     - name: dataPath
       type: string
@@ -21,7 +23,7 @@ spec:
       type: string
       default: binaries
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
@@ -30,7 +32,7 @@ spec:
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions

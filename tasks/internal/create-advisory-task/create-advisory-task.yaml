@@ -17,7 +17,7 @@ spec:
     - name: advisory_json
       type: string
       description: |
-          String containing a JSON representation of the advisory data (e.g. '{"product_id":123,"type":"RHSA"}').
+          String containing a JSON representation of the advisory data (e.g. '{"product_id":123,"type":"RHSA"}')
     - name: application
       type: string
       description: Application being released
@@ -55,7 +55,7 @@ spec:
       description: Name of this Task Run to be made available to caller
   steps:
     - name: create-advisory
-      image: quay.io/konflux-ci/release-service-utils:20e010a0dde28e31826ce91914d5852d73437fc2
+      image: quay.io/konflux-ci/release-service-utils:7addbf5630418cea87bf66df33a05fdd57e43728
       computeResources:
         limits:
           memory: 256Mi
@@ -171,7 +171,9 @@ spec:
             exit 1
           fi
           CONTENT_FILE=/tmp/content.json
-          jq -c "${spec_content_type} // []" <<< "$ADVISORY_JSON" > "$CONTENT_FILE"
+          # Write the advisory JSON parameter to a file to avoid argument length limits
+          printf '%s' "$ADVISORY_JSON" | base64 --decode | gunzip > /tmp/advisory_decoded.json
+          jq -c "${spec_content_type} // []" /tmp/advisory_decoded.json > "$CONTENT_FILE"
 
           # Use ISO 8601 format in UTC/Zulu time, e.g. 2024-03-06T17:27:38Z
           SHIP_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -243,14 +245,16 @@ spec:
               fi
           done
 
-          NEW_ADVISORY_JSON=$(echo "$ADVISORY_JSON" | jq --slurpfile new_content "$CONTENT_FILE" \
-            "${spec_content_type} = \$new_content[0]")
+          NEW_ADVISORY_JSON=$(jq --slurpfile new_content "$CONTENT_FILE" \
+            "${spec_content_type} = \$new_content[0]" /tmp/advisory_decoded.json)
 
           signingKey=$(kubectl get configmap "$(params.config_map_name)" -o jsonpath="{.data.SIG_KEY_NAME}")
-          advisoryJsonWithKey=$(jq -c --arg key "$signingKey" \
-            "${spec_content_type}[] += {\"signingKey\": \$key}" <<< "$NEW_ADVISORY_JSON")
+          # Write to temp file to avoid argument length limits
+          echo "$NEW_ADVISORY_JSON" > /tmp/new_advisory.json
+          jq -c --arg key "$signingKey" \
+            "${spec_content_type}[] += {\"signingKey\": \$key}" /tmp/new_advisory.json > /tmp/advisory_with_key.json
 
-          LIVE_ID=$(jq -r '.live_id' <<< "$ADVISORY_JSON" )
+          LIVE_ID=$(jq -r '.live_id' /tmp/advisory_decoded.json)
           if [[ "$LIVE_ID" == null ]]; then
             # write keytab to file
             echo -n "${SERVICE_ACCOUNT_KEYTAB}" | base64 --decode > /tmp/keytab
@@ -284,12 +288,13 @@ spec:
           ADVISORY_NAME="${YEAR}:${ADVISORY_NUM}"
 
           # Prepare variables for the advisory template
-          DATA=$(jq -c '{"advisory":{"spec":.}}' <<< "$advisoryJsonWithKey")
-          DATA=$(jq -c --arg advisory_name "$ADVISORY_NAME" --arg advisory_ship_date "$SHIP_DATE" \
-            '$ARGS.named + .' <<< "$DATA")
+          # Write to file to avoid argument length limits
+          jq -c '{"advisory":{"spec":.}}' /tmp/advisory_with_key.json > /tmp/template_data.json
+          jq -c --arg advisory_name "$ADVISORY_NAME" --arg advisory_ship_date "$SHIP_DATE" \
+            '$ARGS.named + .' /tmp/template_data.json > /tmp/template_data_final.json
 
-          # Create advisory file
-          /home/utils/apply_template.py -o "$ADVISORY_FILEPATH" --data "$DATA" \
+          # Create advisory file using the updated apply_template.py with --data-file option
+          /home/utils/apply_template.py -o "$ADVISORY_FILEPATH" --data-file /tmp/template_data_final.json \
             --verbose --template /home/templates/advisory.yaml.jinja
 
           cat "$ADVISORY_FILEPATH"
@@ -302,6 +307,6 @@ spec:
           echo "Pushing to ${REPO_BRANCH}..."
           git_push_with_retries --branch $REPO_BRANCH --retries 5 --url origin 2> "$STDERR_FILE"
           # Construct the advisory url on customer portal to report back to the user as a result
-          ADVISORY_TYPE=$(jq -r '.type' <<< "$ADVISORY_JSON" )
+          ADVISORY_TYPE=$(jq -r '.type' /tmp/advisory_decoded.json)
           ADVISORY_URL="${ADVISORY_URL_PREFIX}/${ADVISORY_TYPE}-${ADVISORY_NAME}"
           ADVISORY_INTERNAL_URL="${GIT_REPO//\.git/}/-/raw/${REPO_BRANCH}/${ADVISORY_FILEPATH}"

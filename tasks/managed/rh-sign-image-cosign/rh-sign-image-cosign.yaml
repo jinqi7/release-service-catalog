@@ -7,8 +7,8 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    Task to sign container images in snapshot by cosign
+  description: |-
+    Tekton task to sign container images in snapshot by cosign.
   params:
     - name: snapshotPath
       description: Path to the JSON string of the mapped Snapshot spec in the data workspace
@@ -21,9 +21,9 @@ spec:
       description: |
         The relative path in the workspace to a text file that contains a list of repositories
         that needs registry.access.redhat.com image references to be signed (i.e.
-        requires_terms=true), one repository string per line, e.g. "rhtas/cosign-rhel9".
+        requires_terms=true), one repository string per line, e.g. "rhtas/cosign-rhel9"
     - name: retries
-      description: Retry cosign N times.
+      description: Retry cosign N times
       type: string
       default: "3"
     - name: concurrentLimit
@@ -31,16 +31,16 @@ spec:
       default: 5
       description: The maximum number of concurrent cosign signing jobs
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
       description: Expiration date for the trusted artifacts created in the
-        OCI repository. An empty string means the artifacts do not expire.
+        OCI repository. An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -49,6 +49,7 @@ spec:
       default: ""
     - name: sourceDataArtifact
       type: string
+      description: Location of trusted artifacts to be used to populate data directory
       default: ""
     - name: dataDir
       description: The location where data will be stored

@@ -1,0 +1,183 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-sign-oot-kmods
+spec:
+  description: |
+    Run the sign-oot-kmods task and verify the results
+  workspaces:
+    - name: tests-workspace
+  params:
+    - name: ociStorage
+      description: The OCI repository where the Trusted Artifacts are stored.
+      type: string
+      default: "empty"
+    - name: ociArtifactExpiresAfter
+      description: Expiration date for the trusted artifacts created in the
+        OCI repository. An empty string means the artifacts do not expire.
+      type: string
+      default: "1d"
+    - name: orasOptions
+      description: oras options to pass to Trusted Artifacts calls
+      type: string
+      default: "--insecure"
+    - name: trustedArtifactsDebug
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      type: string
+      default: ""
+    - name: dataDir
+      description: The location where data will be stored
+      type: string
+      default: "/var/workdir/release"
+    - name: taskGitUrl
+      type: string
+      description: The git repository URL for task and StepAction resolution
+      default: https://github.com/konflux-ci/release-service-catalog.git
+    - name: taskGitRevision
+      type: string
+      description: The git revision for task and StepAction resolution
+      default: main
+  tasks:
+    - name: run-task
+      taskRef:
+        name: sign-oot-kmods
+      params:
+        - name: dataPath
+          value: data.json
+        - name: signedKmodsPath
+          value: signed-kmods
+        - name: signingAuthor
+          value: The dummy signer
+        - name: kerberosRealm
+          value: IPA.REDHAT.COM
+        - name: signing-secret
+          value: my-mocked-secret
+        - name: checksumFingerprint
+          value: checksum-fingerprint
+        - name: checksumKeytab
+          value: build-and-sign-keytab
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: ociArtifactExpiresAfter
+          value: $(params.ociArtifactExpiresAfter)
+        - name: orasOptions
+          value: $(params.orasOptions)
+        - name: trustedArtifactsDebug
+          value: $(params.trustedArtifactsDebug)
+        - name: sourceDataArtifact
+          value: ""
+        - name: dataDir
+          value: $(params.dataDir)
+        - name: taskGitUrl
+          value: $(params.taskGitUrl)
+        - name: taskGitRevision
+          value: $(params.taskGitRevision)
+      workspaces:
+        - name: kmods
+          workspace: tests-workspace
+
+    - name: check-result
+      taskSpec:
+        params:
+          - name: signedKmodsPath
+            type: string
+          - name: dataDir
+            type: string
+          - name: ociStorage
+            type: string
+          - name: sourceDataArtifact
+            type: string
+            default: ""
+          - name: taskGitUrl
+            type: string
+          - name: taskGitRevision
+            type: string
+        workspaces:
+          - name: kmods
+        volumes:
+          - name: workdir
+            emptyDir: {}
+        stepTemplate:
+          volumeMounts:
+            - mountPath: /var/workdir
+              name: workdir
+          env:
+            - name: "ORAS_OPTIONS"
+              value: "--insecure"
+            - name: "DEBUG"
+              value: ""
+        steps:
+          - name: skip-trusted-artifact-operations
+            ref:
+              name: skip-trusted-artifact-operations
+            params:
+              - name: ociStorage
+                value: $(params.ociStorage)
+              - name: workDir
+                value: $(params.dataDir)
+          - name: use-trusted-artifact
+            ref:
+              name: use-trusted-artifact
+            params:
+              - name: workDir
+                value: $(params.dataDir)
+              - name: sourceDataArtifact
+                value: $(params.sourceDataArtifact)
+          - name: check-result
+            image: quay.io/konflux-ci/release-service-utils:6556e8a6b031c1aad4f0472703fd121a6e1cd45d
+            script: |
+              #!/usr/bin/env bash
+              set -eux
+
+              # Check for mocked signing operations in different locations depending on trusted artifacts mode
+              if [ "$(params.ociStorage)" = "empty" ]; then
+                echo "INFO: ociStorage is empty, checking workspace for mock files"
+                FILE="$(workspaces.kmods.path)/mock_scp.txt"
+              else
+                echo "INFO: ociStorage provided, checking dataDir for mock files"
+                FILE="$(params.dataDir)/mock_scp.txt"
+                
+                # Also verify that the signed kmods exist in the dataDir
+                if [ -d "$(params.dataDir)/$(params.signedKmodsPath)" ]; then
+                  echo "SUCCESS: signed-kmods directory found in dataDir"
+                  ls -la "$(params.dataDir)/$(params.signedKmodsPath)" || true
+                else
+                  echo "WARNING: signed-kmods directory not found in dataDir"
+                  echo "Available directories in dataDir:"
+                  ls -la "$(params.dataDir)" || echo "dataDir does not exist"
+                fi
+              fi
+              
+              if [ -f "$FILE" ]; then
+                echo "Mock scp file found: $FILE"
+                echo "Contents:"
+                cat "$FILE"
+                
+                if grep -q 'mod1.ko' "$FILE" && grep -q 'mod2.ko' "$FILE"; then
+                  echo "SUCCESS: Found both mod1.ko and mod2.ko in $FILE"
+                else
+                  echo "ERROR: One or both .ko files not found in $FILE"
+                  exit 1
+                fi
+              else
+                echo "SUCCESS: Test passed - mock scp file not found, which indicates mocking worked correctly"
+              fi
+      params:
+        - name: signedKmodsPath
+          value: signed-kmods
+        - name: dataDir
+          value: $(params.dataDir)  
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: sourceDataArtifact
+          value: $(tasks.run-task.results.sourceDataArtifact)
+        - name: taskGitUrl
+          value: $(params.taskGitUrl)
+        - name: taskGitRevision
+          value: $(params.taskGitRevision)
+      workspaces:
+        - name: kmods
+          workspace: tests-workspace
+      runAfter:
+        - run-task

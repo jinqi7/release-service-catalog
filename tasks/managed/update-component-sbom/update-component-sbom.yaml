@@ -7,20 +7,20 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    Update component-level SBOM with purls with release-time info.
+  description: |-
+    Tekton task to update component-level SBOMs with purls containing release-time info.
   params:
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
       description: Expiration date for the trusted artifacts created in the
-        OCI repository. An empty string means the artifacts do not expire.
+        OCI repository. An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -42,10 +42,10 @@ spec:
       default: $(workspaces.data.path)
     - name: snapshotSpec
       type: string
-      description: Path to the mapped snapshot spec.
+      description: Path to the mapped snapshot spec
     - name: sbomPath
       type: string
-      description: Path to store the updated SBOMs to.
+      description: Path to store the updated SBOMs to
       default: "sboms"
     - name: taskGitUrl
       type: string
@@ -55,13 +55,13 @@ spec:
       description: The revision in the taskGitUrl repo to be used
   workspaces:
     - name: data
-      description: The workspace where the SBOM files reside.
+      description: The workspace where the SBOM files reside
   results:
     - description: Produced trusted data artifact
       name: sourceDataArtifact
       type: string
     - name: sbomPath
-      description: Path to the directory containing updated SBOMs.
+      description: Path to the directory containing updated SBOMs
       type: string
   volumes:
     - name: workdir
@@ -121,7 +121,7 @@ spec:
         - name: sourceDataArtifact
           value: $(params.sourceDataArtifact)
     - name: update-sboms
-      image: quay.io/konflux-ci/release-service-utils:f1796a941065d1ea8f32380045af56c98d4a8621
+      image: quay.io/konflux-ci/release-service-utils:40c0e87369ee166f8f80fc4cf52fb59129dfa418
       computeResources:
         limits:
           memory: 512Mi

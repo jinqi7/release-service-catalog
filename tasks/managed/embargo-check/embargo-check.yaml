@@ -8,12 +8,15 @@ metadata:
     tekton.dev/tags: release
 spec:
   description: >
-    Tekton task to check if any issues or CVEs in the releaseNotes key of the data.json
-    are embargoed. It checks the issues by server using curl and checks the CVEs via an
-    InternalRequest. If any issue does not exist or any CVE is embargoed, the task will
-    fail. The task will also fail if a Jira issue listed is for a component that does
-    not exist in the releaseNotes.content.images section or if said component does not
-    list the CVE from the issue.
+    Tekton task to check if any issues or CVEs in the releaseNotes key of
+    the data.json are embargoed. It checks the issues by server using curl and
+    checks the CVEs via an InternalRequest. If any issue does not exist or any CVE is embargoed,
+    the task will fail. The task will also fail if a Jira issue listed is
+    for a component that does not exist in the releaseNotes.content.[images|artifacts] section
+    or if said component does not list the CVE from the issue.
+
+    Finally, the task will inject the `public` key to each issue listed for `issues.redhat.com`.
+    This is a boolean value that is set based on the issues visibility.
   params:
     - name: dataPath
       description: Path to the JSON string of the merged data to use in the data workspace
@@ -26,16 +29,16 @@ spec:
       type: string
       description: The uid of the current pipelineRun. Used as a label value when creating internal requests
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
       description: Expiration date for the trusted artifacts created in the
-        OCI repository. An empty string means the artifacts do not expire.
+        OCI repository. An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -187,11 +190,6 @@ spec:
                 continue
             fi
 
-            # Perform additional checks only for issues on issues.redhat.com
-            if [ "$server" != "issues.redhat.com" ] ; then
-                continue
-            fi
-
             # Public should be true if and only if the security field doesn't exist and the issue is accessible
             # without authentication
             public=false
@@ -206,6 +204,11 @@ spec:
             # Inject public key
             jq --argjson i "$i" --argjson public $public '.releaseNotes.issues.fixed[$i].public = $public' \
                 "${DATA_FILE}" > /tmp/data.tmp && mv /tmp/data.tmp "${DATA_FILE}"
+
+            # Perform additional checks only for issues on issues.redhat.com
+            if [ "$server" != "issues.redhat.com" ] ; then
+                continue
+            fi
 
             # Perform cve id check only if the type is Vulnerability
             ISSUE_TYPE=$(jq -r '.fields.issuetype.name' <<< "$OUTPUT")
@@ -283,12 +286,17 @@ spec:
 
         IR_RESULT_FILE=$(mktemp)
 
+        requestTimeout=$(($(params.requestTimeout)+300))
+        pipelineTimeout=$(date -u -d @${requestTimeout} +"%Hh%Mm%Ss")
+        taskTimeout=$(date -u -d @"$(params.requestTimeout)" +"%Hh%Mm%Ss")
         internal-request --pipeline "check-embargoed-cves" \
             -p cves="${CVES}" \
             -p taskGitUrl="$(params.taskGitUrl)" \
             -p taskGitRevision="$(params.taskGitRevision)" \
             -l ${PIPELINERUN_LABEL}="$(params.pipelineRunUid)" \
             -t "$(params.requestTimeout)" \
+            --pipeline-timeout "$pipelineTimeout" \
+            --task-timeout "$taskTimeout" \
             -s true \
             | tee "$IR_RESULT_FILE" || \
             (grep "^\[" "$IR_RESULT_FILE" | jq . && exit 1)

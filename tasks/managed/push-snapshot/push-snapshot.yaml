@@ -7,8 +7,8 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: >-
-    Tekton task to push snapshot images to an image registry using `cosign copy`
+  description: |-
+    Tekton task to push snapshot images to an image registry using `cosign copy`.
   params:
     - name: snapshotPath
       description: Path to the JSON string of the mapped Snapshot spec in the data workspace
@@ -24,28 +24,28 @@ spec:
       type: string
       default: "10"
     - name: retries
-      description: Retry copy N times.
+      description: Retry copy N times
       type: string
       default: "3"
     - name: caTrustConfigMapName
       type: string
-      description: The name of the ConfigMap to read CA bundle data from.
+      description: The name of the ConfigMap to read CA bundle data from
       default: trusted-ca
     - name: caTrustConfigMapKey
       type: string
-      description: The name of the key in the ConfigMap that contains the CA bundle data.
+      description: The name of the key in the ConfigMap that contains the CA bundle data
       default: ca-bundle.crt
     - name: ociStorage
-      description: The OCI repository where the Trusted Artifacts are stored.
+      description: The OCI repository where the Trusted Artifacts are stored
       type: string
       default: "empty"
     - name: ociArtifactExpiresAfter
       description: Expiration date for the trusted artifacts created in the
-        OCI repository. An empty string means the artifacts do not expire.
+        OCI repository. An empty string means the artifacts do not expire
       type: string
       default: "1d"
     - name: trustedArtifactsDebug
-      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable.
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
       type: string
       default: ""
     - name: orasOptions
@@ -138,7 +138,7 @@ spec:
         - name: sourceDataArtifact
           value: $(params.sourceDataArtifact)
     - name: push-snapshot
-      image: quay.io/konflux-ci/release-service-utils:066a63d25546239e79533b99c83ff521a045c819
+      image: quay.io/konflux-ci/release-service-utils:ea7868ebdcc7a2116c620255034226611d837f42
       computeResources:
         limits:
           memory: 512Mi
@@ -220,7 +220,8 @@ spec:
         fi
 
         RESULTS_FILE="$(params.dataDir)/$(params.resultsDirPath)/push-snapshot-results.json"
-        RESULTS_JSON="{\"images\":[]}"
+        RESULTS_JSON_FILE=$(mktemp)
+        echo '{"images":[]}' > "$RESULTS_JSON_FILE"
 
         RUNNING_JOBS="\j" # A Bash param for number of jobs running
         CONCURRENT_LIMIT=$(params.concurrentLimit)
@@ -278,10 +279,10 @@ spec:
           # we do not use oras_args here since we want to get the manifest index image digest
           origin_digest=$(oras resolve --registry-config "$SOURCE_AUTH_FILE" "${containerImage}")
 
-          RESULTS_JSON=$(jq --arg i "$i" --argjson arches "$arches" --argjson oses "$oses" --arg name "$name" \
+          jq --arg i "$i" --argjson arches "$arches" --argjson oses "$oses" --arg name "$name" \
             --arg sha "$origin_digest" \
             '.images[$i|tonumber] += {"arches": $arches, "oses": $oses, "name": $name, "shasum": $sha, "urls": []}' \
-              <<< "$RESULTS_JSON")
+              "$RESULTS_JSON_FILE" > "$RESULTS_JSON_FILE.tmp" && mv "$RESULTS_JSON_FILE.tmp" "$RESULTS_JSON_FILE"
 
           # Push source container if the component has pushSourceContainer: true or if the
           # pushSourceContainer key is missing from the component and the defaults has
@@ -347,10 +348,17 @@ spec:
             exit 1
         fi
 
-        PUSHES=$(jq -s . "$TMP_RESULTS_DIR"/*.json)
-        jq --argjson PUSHES "$PUSHES" '
-          reduce $PUSHES[] as $p (.; (.images[] | select(.name == $p.name).urls) += [$p.url])
-        ' <<< "$RESULTS_JSON" | tee "$RESULTS_FILE"
+        # Create a temporary file for the pushes data to avoid command line argument length limits
+        PUSHES_FILE=$(mktemp)
+        jq -s . "$TMP_RESULTS_DIR"/*.json > "$PUSHES_FILE"
+        
+        # Use file input instead of command line arguments to avoid argument length limits
+        jq --slurpfile PUSHES "$PUSHES_FILE" '
+          reduce $PUSHES[0][] as $p (.; (.images[] | select(.name == $p.name).urls) += [$p.url])
+        ' "$RESULTS_JSON_FILE" | tee "$RESULTS_FILE"
+        
+        # Clean up temporary files
+        rm -f "$RESULTS_JSON_FILE" "$RESULTS_JSON_FILE.tmp" "$PUSHES_FILE"
 
         printf 'Completed "%s" for "%s"\n\n' "$(context.task.name)" "$application"
       volumeMounts:
