@@ -1,3 +1,4 @@
+---
 name: Run Ollama AI Agent
 
 on:
@@ -19,19 +20,12 @@ jobs:
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
-
-      - name: Get commits from last 24 hours
+      - name: Get commits from last 24 hours 
+        id: get-commits
         run: |
           echo "Commits in the past 24 hours:"
           git log --since="24 hours ago" --pretty=format:"%h - %an: %s" > summary.txt
           cat summary.txt
-
-      - name: Cache Ollama models
-        uses: actions/cache@v3
-        with:
-          path: ~/.ollama
-          key: ollama-models-${{ runner.os }}
-
       - name: Set up Docker
         uses: docker/setup-buildx-action@v3
 
@@ -44,3 +38,50 @@ jobs:
             -p 11434:11434 \
             -v ~/.ollama:/root/.ollama \
             ollama/ollama
+      - name: Wait for Ollama to be ready
+        run: |
+          echo "Waiting for Ollama to start..."
+          for i in {1..20}; do
+            curl -s http://localhost:11434/api/tags && break || sleep 3
+          done
+      - name: Pull Ollama model
+        run: |
+          mkdir -p ollama_cache
+          cd ollama_cache
+          curl http://localhost:11434/api/pull \
+             -d '{"name": "llama3"}' \
+             -H "Content-Type: application/json"
+      - name: Cache Ollama models
+        uses: actions/cache@v3
+        with:
+          path: ollama_cache
+          key: ollama-models-${{ runner.os }}
+
+      - name: Install Python dependencies
+        run: pip install requests
+
+      - name: Run LLM agent
+        id: run-llm
+        run: |
+          python ollama_prompt.py > summary_output.txt
+          echo "summary<<EOF" >> $GITHUB_OUTPUT
+          cat summary_output.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        env:
+          COMMITS_FILE: summary.txt
+
+      - name: Send email with summary
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "Release Service Catalog weekly update"
+          body: |
+            Hi,
+            Here is release service catalog weekly update from staging branch:
+            ${{ steps.run-llm.outputs.summary }}
+          to: jinqi@redhat.com
+          from: ${{ secrets.SMTP_USERNAME }}
+          secure: true
