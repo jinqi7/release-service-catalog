@@ -7,7 +7,7 @@ impact from all of the CVEs is returned as a task result.
 
 ## Parameters
 
-| Name                           | Description                                           | Optional | Default value |
-|--------------------------------|-------------------------------------------------------|----------|---------------|
-| releaseNotesImages             | Json array of image specific details for the advisory | No       | -             |
-| internalRequestPipelineRunName | name of the PipelineRun that called this task         | No       | -             |
+| Name                           | Description                                                                    | Optional | Default value |
+|--------------------------------|--------------------------------------------------------------------------------|----------|---------------|
+| releaseNotesImages             | Base64 string of gzipped JSON array of image specific details for the advisory | No       | -             |
+| internalRequestPipelineRunName | name of the PipelineRun that called this task                                  | No       | -             |

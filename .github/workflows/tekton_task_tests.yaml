@@ -31,6 +31,7 @@ jobs:
         run: |
           echo ${{ steps.changed-dirs.outputs.all_changed_files }}
           trustedArtifactsBasedTasks=()
+          pvcBasedTasks=()
           for dir in ${{ steps.changed-dirs.outputs.all_changed_files }}
           do
             echo "$dir"
@@ -45,10 +46,15 @@ jobs:
                 echo "Found a trusted artifacts compatible task: ${taskFile}"
                 trustedArtifactsBasedTasks+=($dir)
               fi
+            else
+              echo "Found a legacy PVC-based task: ${taskFile}"
+              pvcBasedTasks+=($dir)
             fi
           done
           echo "trustedArtifactsBasedTasks: ${trustedArtifactsBasedTasks[@]}"
           echo "trustedArtifactsBasedTasks=${trustedArtifactsBasedTasks[@]}" >> $GITHUB_OUTPUT
+          echo "pvcBasedTasks: ${pvcBasedTasks[@]}"
+          echo "pvcBasedTasks=${pvcBasedTasks[@]}" >> $GITHUB_OUTPUT
       - name: Create k8s Kind Cluster
         uses: helm/kind-action@v1.12.0
         if: |
@@ -113,8 +119,8 @@ jobs:
             ${{ steps.show-changed-dirs.outputs.trustedArtifactsBasedTasks }}
       - name: Test Tekton tasks using PVC-based workspace
         if: |
-          steps.changed-dirs.outputs.any_changed == 'true'
+          steps.show-changed-dirs.outputs.pvcBasedTasks != ''
         run: .github/scripts/test_tekton_tasks.sh
         env:
           TEST_ITEMS: >-
-            ${{ steps.changed-dirs.outputs.all_changed_files }}
+            ${{ steps.show-changed-dirs.outputs.pvcBasedTasks }}

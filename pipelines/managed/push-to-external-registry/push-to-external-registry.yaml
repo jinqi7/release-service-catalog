@@ -35,18 +35,6 @@ spec:
         Extra rule data to be merged into the policy specified in params.enterpriseContractPolicy. Use syntax
         "key1=value1,key2=value2..."
       default: "pipeline_intention=release"
-    - name: enterpriseContractTimeout
-      type: string
-      description: Timeout setting for `ec validate`
-      default: 8h0m0s
-    - name: enterpriseContractWorkerCount
-      type: string
-      description: Number of parallel workers for policy evaluation
-      default: 4
-    - name: postCleanUp
-      type: string
-      description: Cleans up workspace after finishing executing the pipeline
-      default: "true"
     - name: verify_ec_task_git_revision
       type: string
       description: The git revision to be used when consuming the verify-conforma task
@@ -75,8 +63,6 @@ spec:
       # to avoid tar extraction errors, we need to specify a subdirectory
       # inside the volume.
       default: "/var/workdir/release"
-  workspaces:
-    - name: release-workspace
   tasks:
     - name: verify-access-to-resources
       taskRef:
@@ -134,11 +120,41 @@ spec:
           value: "$(params.taskGitUrl)"
         - name: taskGitRevision
           value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - verify-access-to-resources
+    - name: collect-task-params
+      taskRef:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: tasks/managed/collect-task-params/collect-task-params.yaml
+      params:
+        - name: dataDir
+          value: "$(params.dataDir)"
+        - name: dataPath
+          value: "$(tasks.collect-data.results.data)"
+        - name: keysToExtract
+          value: |
+            [
+              {"resultIndex": 0, "key": ".conforma.workerCount", "default": "4"},
+              {"resultIndex": 1, "key": ".conforma.timeout", "default": "8h0m0s"}
+            ]
+        - name: taskGitUrl
+          value: "$(params.taskGitUrl)"
+        - name: taskGitRevision
+          value: "$(params.taskGitRevision)"
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: sourceDataArtifact
+          value: "$(tasks.collect-data.results.sourceDataArtifact)"
+        - name: trustedArtifactsDebug
+          value: "$(params.trustedArtifactsDebug)"
+      runAfter:
+        - collect-data
     - name: check-data-keys
       params:
         - name: dataPath
@@ -146,8 +162,10 @@ spec:
         - name: schema
           value: $(params.taskGitUrl)/raw/$(params.taskGitRevision)/schema/dataKeys.json
         - name: systems
-          value:
-            - mapping
+          value: |
+            [
+              {"systemName": "mapping", "dynamic": false}
+            ]
         - name: ociStorage
           value: $(params.ociStorage)
         - name: sourceDataArtifact
@@ -169,9 +187,6 @@ spec:
           - name: pathInRepo
             value: tasks/managed/check-data-keys/check-data-keys.yaml
         resolver: git
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - collect-data
     - name: reduce-snapshot
@@ -207,9 +222,6 @@ spec:
           value: "$(params.taskGitUrl)"
         - name: taskGitRevision
           value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - collect-data
     - name: apply-mapping
@@ -242,9 +254,6 @@ spec:
           value: "$(params.taskGitUrl)"
         - name: taskGitRevision
           value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - reduce-snapshot
     - name: verify-conforma
@@ -273,15 +282,16 @@ spec:
         - name: EXTRA_RULE_DATA
           value: $(params.enterpriseContractExtraRuleData)
         - name: TIMEOUT
-          value: $(params.enterpriseContractTimeout)
+          value: "$(tasks.collect-task-params.results.extractedValues[1])"
         - name: WORKERS
-          value: $(params.enterpriseContractWorkerCount)
+          value: "$(tasks.collect-task-params.results.extractedValues[0])"
         - name: SOURCE_DATA_ARTIFACT
           value: "$(tasks.apply-mapping.results.sourceDataArtifact)"
         - name: TRUSTED_ARTIFACTS_DEBUG
           value: "$(params.trustedArtifactsDebug)"
       runAfter:
         - apply-mapping
+        - collect-task-params
     - name: push-snapshot
       retries: 5
       when:
@@ -316,9 +326,6 @@ spec:
           value: "$(params.taskGitUrl)"
         - name: taskGitRevision
           value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - verify-conforma
     - name: collect-registry-token-secret
@@ -338,8 +345,6 @@ spec:
           value: $(params.ociStorage)
         - name: sourceDataArtifact
           value: "$(tasks.collect-data.results.sourceDataArtifact)"
-        - name: subdirectory
-          value: $(tasks.collect-data.results.subdirectory)
         - name: dataDir
           value: $(params.dataDir)
         - name: trustedArtifactsDebug
@@ -348,9 +353,6 @@ spec:
           value: "$(params.taskGitUrl)"
         - name: taskGitRevision
           value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - collect-data
     - name: make-repo-public
@@ -359,9 +361,6 @@ spec:
         - input: "$(tasks.collect-registry-token-secret.results.registrySecret)"
           operator: notin
           values: [""]
-      workspaces:
-        - name: data
-          workspace: release-workspace
       taskRef:
         resolver: "git"
         params:
@@ -397,8 +396,6 @@ spec:
           value: $(params.release)
         - name: resultsDirPath
           value: $(tasks.collect-data.results.resultsDir)
-        - name: resultsDirName
-          value: "results"
         - name: ociStorage
           value: $(params.ociStorage)
         - name: resultArtifacts
@@ -421,8 +418,5 @@ spec:
             value: $(params.taskGitRevision)
           - name: pathInRepo
             value: tasks/managed/update-cr-status/update-cr-status.yaml
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - push-snapshot

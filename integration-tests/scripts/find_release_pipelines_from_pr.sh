@@ -122,7 +122,10 @@ _find_and_process_pipelines() {
     # remove leading spaces
     pipeline_name="${pipeline_name//[[:space:]]/}"
     case "$pipeline_name" in
-      "create-advisory"|"check-embargoed-cves"|"get-advisory-severity"|"filter-already-released-advisory-images")
+      "create-advisory")
+        TEMP_MANAGED_PIPELINENAMES+=("rh-advisories" "release-to-github")
+        ;;
+      "check-embargoed-cves"|"get-advisory-severity"|"filter-already-released-advisory-images")
         TEMP_MANAGED_PIPELINENAMES+=("rh-advisories")
         ;;
       "update-fbc-catalog"|"publish-index-image-pipeline")
@@ -195,7 +198,7 @@ _find_and_process_pipelines() {
     export FOUND_PIPELINES="${FOUND_PIPELINENAMES[*]}"
   fi
 
-  ALL_TESTCASES=("rh-advisories" "fbc-release" "release-to-github" "push-to-external-registry" "rhtap-service-push" "rh-push-to-registry-redhat-io" "rh-push-to-external-registry" "push-to-addons-registry")
+  ALL_TESTCASES=("e2e" "rh-advisories" "fbc-release" "release-to-github" "push-to-external-registry" "rhtap-service-push" "rh-push-to-registry-redhat-io" "rh-push-to-external-registry" "push-to-addons-registry")
   SELECTED_TESTCASES=()
 
   for pplname in "${FOUND_PIPELINENAMES[@]}"; do
@@ -275,8 +278,17 @@ find_changed_tekton_tasks_pipelines() {
       SELECT_ALL_TESTCASES=true
       break
     elif echo "$file" | grep -q "^integration-tests/"; then
-      IFS='/' read -ra parts <<< "$file"
-      INTEGRATION_SUITES+=("${parts[1]}")
+      # Check if the file is in lib/, scripts/, or is run-test.sh - these should trigger all test suites
+      if echo "$file" | grep -q -E "^integration-tests/(lib|scripts)/|^integration-tests/run-test\.sh$"; then
+        SELECT_ALL_TESTCASES=true
+        break
+      else
+        filename=$(basename "$file")
+        if [[ ! $filename =~ \.md$ ]]; then
+          IFS='/' read -ra parts <<< "$file"
+          INTEGRATION_SUITES+=("${parts[1]}")
+        fi
+      fi
     elif [[ "$file" =~ ^tasks/internal/[^/]+/[^/]+\.ya?ml$ ]] && [ -f "$file" ]; then
       if grep -q -E 'kind: *Task' "$file"; then
         TEKTON_INTERNAL_TASKS+=("$file")

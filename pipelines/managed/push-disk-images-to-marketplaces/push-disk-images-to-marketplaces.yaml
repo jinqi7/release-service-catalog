@@ -35,10 +35,6 @@ spec:
         Extra rule data to be merged into the policy specified in params.enterpriseContractPolicy. Use syntax
         "key1=value1,key2=value2..."
       default: "pipeline_intention=release"
-    - name: enterpriseContractTimeout
-      type: string
-      description: Timeout setting for `ec validate`
-      default: 10m0s
     - name: verify_ec_task_git_revision
       type: string
       description: The git revision to be used when consuming the verify-conforma task
@@ -71,8 +67,6 @@ spec:
       # to avoid tar extraction errors, we need to specify a subdirectory
       # inside the volume.
       default: "/var/workdir/release"
-  workspaces:
-    - name: release-workspace
   tasks:
     - name: verify-access-to-resources
       taskRef:
@@ -130,9 +124,6 @@ spec:
           value: "$(params.taskGitUrl)"
         - name: taskGitRevision
           value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - verify-access-to-resources
     - name: reduce-snapshot
@@ -168,9 +159,40 @@ spec:
           value: "$(params.taskGitUrl)"
         - name: taskGitRevision
           value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
+      runAfter:
+        - collect-data
+    - name: collect-task-params
+      taskRef:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: tasks/managed/collect-task-params/collect-task-params.yaml
+      params:
+        - name: dataDir
+          value: "$(params.dataDir)"
+        - name: dataPath
+          value: "$(tasks.collect-data.results.data)"
+        - name: keysToExtract
+          value: |
+            [
+              {"resultIndex": 0, "key": ".conforma.timeout", "default": "10m0s"},
+              {"resultIndex": 1, "key": ".mapping.cloudMarketplacesSecret"},
+              {"resultIndex": 2, "key": ".mapping.cloudMarketplacesPrePush", "default": "false"}
+            ]
+        - name: taskGitUrl
+          value: "$(params.taskGitUrl)"
+        - name: taskGitRevision
+          value: "$(params.taskGitRevision)"
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: sourceDataArtifact
+          value: "$(tasks.collect-data.results.sourceDataArtifact)"
+        - name: trustedArtifactsDebug
+          value: "$(params.trustedArtifactsDebug)"
       runAfter:
         - collect-data
     - name: apply-mapping
@@ -203,9 +225,6 @@ spec:
           value: "$(params.taskGitUrl)"
         - name: taskGitRevision
           value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - reduce-snapshot
     - name: verify-conforma
@@ -233,43 +252,13 @@ spec:
         - name: EXTRA_RULE_DATA
           value: $(params.enterpriseContractExtraRuleData)
         - name: TIMEOUT
-          value: $(params.enterpriseContractTimeout)
+          value: "$(tasks.collect-task-params.results.extractedValues[0])"
         - name: SOURCE_DATA_ARTIFACT
           value: "$(tasks.apply-mapping.results.sourceDataArtifact)"
         - name: TRUSTED_ARTIFACTS_DEBUG
           value: "$(params.trustedArtifactsDebug)"
       runAfter:
         - apply-mapping
-    - name: collect-marketplacesvm-params
-      taskRef:
-        resolver: "git"
-        params:
-          - name: url
-            value: $(params.taskGitUrl)
-          - name: revision
-            value: $(params.taskGitRevision)
-          - name: pathInRepo
-            value: tasks/managed/collect-marketplacesvm-params/collect-marketplacesvm-params.yaml
-      params:
-        - name: dataPath
-          value: "$(tasks.collect-data.results.data)"
-        - name: ociStorage
-          value: $(params.ociStorage)
-        - name: sourceDataArtifact
-          value: "$(tasks.apply-mapping.results.sourceDataArtifact)"
-        - name: dataDir
-          value: $(params.dataDir)
-        - name: trustedArtifactsDebug
-          value: "$(params.trustedArtifactsDebug)"
-        - name: taskGitUrl
-          value: "$(params.taskGitUrl)"
-        - name: taskGitRevision
-          value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
-      runAfter:
-        - verify-conforma
     - name: marketplacesvm-push-disk-images
       timeout: "12h00m0s"
       when:
@@ -288,16 +277,14 @@ spec:
       params:
         - name: snapshotPath
           value: "$(tasks.collect-data.results.snapshotSpec)"
-        - name: dataPath
-          value: "$(tasks.collect-data.results.data)"
         - name: cloudMarketplacesSecret
-          value: "$(tasks.collect-marketplacesvm-params.results.cloudMarketplacesSecret)"
+          value: "$(tasks.collect-task-params.results.extractedValues[1])"
         - name: prePush
-          value: "$(tasks.collect-marketplacesvm-params.results.prePush)"
+          value: "$(tasks.collect-task-params.results.extractedValues[2])"
         - name: ociStorage
           value: $(params.ociStorage)
         - name: sourceDataArtifact
-          value: "$(tasks.collect-marketplacesvm-params.results.sourceDataArtifact)"
+          value: "$(tasks.apply-mapping.results.sourceDataArtifact)"
         - name: dataDir
           value: $(params.dataDir)
         - name: trustedArtifactsDebug
@@ -306,11 +293,8 @@ spec:
           value: "$(params.taskGitUrl)"
         - name: taskGitRevision
           value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
-        - collect-marketplacesvm-params
+        - collect-task-params
   finally:
     - name: cleanup-internal-requests
       taskRef:

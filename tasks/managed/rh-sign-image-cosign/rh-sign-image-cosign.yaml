@@ -28,7 +28,7 @@ spec:
       default: "3"
     - name: concurrentLimit
       type: string
-      default: 5
+      default: 90
       description: The maximum number of concurrent cosign signing jobs
     - name: ociStorage
       description: The OCI repository where the Trusted Artifacts are stored
@@ -54,16 +54,13 @@ spec:
     - name: dataDir
       description: The location where data will be stored
       type: string
-      default: $(workspaces.data.path)
+      default: /var/workdir/release
     - name: taskGitUrl
       type: string
       description: The url to the git repo where the release-service-catalog tasks and stepactions to be used are stored
     - name: taskGitRevision
       type: string
       description: The revision in the taskGitUrl repo to be used
-  workspaces:
-    - name: data
-      description: Workspace to read and save files
   results:
     - description: Produced trusted data artifact
       name: sourceDataArtifact
@@ -83,27 +80,6 @@ spec:
       - name: "DEBUG"
         value: "$(params.trustedArtifactsDebug)"
   steps:
-    - name: skip-trusted-artifact-operations
-      computeResources:
-        limits:
-          memory: 32Mi
-        requests:
-          memory: 32Mi
-          cpu: 20m
-      ref:
-        resolver: "git"
-        params:
-          - name: url
-            value: $(params.taskGitUrl)
-          - name: revision
-            value: $(params.taskGitRevision)
-          - name: pathInRepo
-            value: stepactions/skip-trusted-artifact-operations/skip-trusted-artifact-operations.yaml
-      params:
-        - name: ociStorage
-          value: $(params.ociStorage)
-        - name: workDir
-          value: $(params.dataDir)
     - name: use-trusted-artifact
       computeResources:
         limits:
@@ -129,9 +105,9 @@ spec:
       image: quay.io/konflux-ci/release-service-utils:70be98cc78c9ef52526c4f2be437321aa943b516
       computeResources:
         limits:
-          memory: 2Gi
+          memory: 2.5Gi
         requests:
-          memory: 2Gi
+          memory: 2.5Gi
           cpu: '2'
       env:
         - name: AWS_DEFAULT_REGION
@@ -378,26 +354,5 @@ spec:
           value: $(params.ociStorage)
         - name: workDir
           value: $(params.dataDir)
-        - name: sourceDataArtifact
-          value: $(results.sourceDataArtifact.path)
-    - name: patch-source-data-artifact-result
-      computeResources:
-        limits:
-          memory: 32Mi
-        requests:
-          memory: 32Mi
-          cpu: 20m
-      ref:
-        resolver: "git"
-        params:
-          - name: url
-            value: $(params.taskGitUrl)
-          - name: revision
-            value: $(params.taskGitRevision)
-          - name: pathInRepo
-            value: stepactions/patch-source-data-artifact-result/patch-source-data-artifact-result.yaml
-      params:
-        - name: ociStorage
-          value: $(params.ociStorage)
         - name: sourceDataArtifact
           value: $(results.sourceDataArtifact.path)

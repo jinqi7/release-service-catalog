@@ -13,7 +13,11 @@ spec:
         name: get-advisory-severity
       params:
         - name: releaseNotesImages
-          value: '[{"repository":"foo","cves":{"fixed":{"CVE-critical":{"components":[]},"CVE-moderate":{"components":[]}}}},{"repository":"bar","cves":{"fixed":{"CVE-critical":{"components":[]},"CVE-moderate":{"components":[]}}}}]'
+          value: >-
+            H4sIAAAAAAAAA4uuVipKLcgvzizJL6pUslJKy89X0lFKLkstVrKqVkrLrEhNATGcw1x1k4sySzKTE3NA/OT83IL8vNS8EqCy6NhaHbCC3PyU1KLEklQsCoBAB82mpMQiGtkUywUA4JaextYAAAA=
+          # value before before `gzip -c|base64 -w 0` encoding:
+          # [{"repository":"foo","cves":{"fixed":{"CVE-critical":{"components":[]},
+          # "CVE-moderate":{"components":[]}}}},{"repository":"bar","cves":{"fixed":{"CVE-critical":{"components":[]},"CVE-moderate":{"components":[]}}}}]
         - name: internalRequestPipelineRunName
           value: $(context.pipelineRun.name)
     - name: check-result
@@ -32,7 +36,7 @@ spec:
             type: string
         steps:
           - name: check-result
-            image: quay.io/konflux-ci/release-service-utils:e633d51cd41d73e4b3310face21bb980af7a662f
+            image: quay.io/konflux-ci/release-service-utils:7a1d88df0e5aa21f6219db2a8732af87eed7ed73
             script: |
               #!/usr/bin/env bash
               set -eux

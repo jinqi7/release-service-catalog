@@ -15,8 +15,5 @@ subjects:
     name: ${managed_sa_name}
     namespace: ${managed_namespace}
   - kind: ServiceAccount
-    name: appstudio-pipeline
-    namespace: ${tenant_namespace}
-  - kind: ServiceAccount
     name: ${tenant_sa_name}
     namespace: ${tenant_namespace}

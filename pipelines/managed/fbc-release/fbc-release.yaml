@@ -35,14 +35,6 @@ spec:
         Extra rule data to be merged into the policy specified in params.enterpriseContractPolicy. Use syntax
         "key1=value1,key2=value2..."
       default: "pipeline_intention=release"
-    - name: enterpriseContractTimeout
-      type: string
-      description: Timeout setting for `ec validate`
-      default: 8h0m0s
-    - name: enterpriseContractWorkerCount
-      type: string
-      description: Number of parallel workers for policy evaluation
-      default: 4
     - name: verify_ec_task_bundle
       type: string
       description: The location of the bundle containing the verify-enterprise-contract task
@@ -56,10 +48,6 @@ spec:
     - name: taskGitRevision
       type: string
       description: The revision in the taskGitUrl repo to be used
-    - name: postCleanUp
-      type: string
-      description: Cleans up workspace after finishing executing the pipeline
-      default: "true"
     - name: ociStorage
       type: string
       description: The OCI repository where the Trusted Artifacts are stored
@@ -78,8 +66,6 @@ spec:
       # to avoid tar extraction errors, we need to specify a subdirectory
       # inside the volume.
       default: "/var/workdir/release"
-  workspaces:
-    - name: release-workspace
   results:
     - name: requestMessage
       type: string
@@ -150,12 +136,9 @@ spec:
           value: "$(params.taskGitUrl)"
         - name: taskGitRevision
           value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - verify-access-to-resources
-    - name: collect-pyxis-params
+    - name: collect-task-params
       taskRef:
         resolver: "git"
         params:
@@ -164,12 +147,20 @@ spec:
           - name: revision
             value: $(params.taskGitRevision)
           - name: pathInRepo
-            value: tasks/managed/collect-pyxis-params/collect-pyxis-params.yaml
+            value: tasks/managed/collect-task-params/collect-task-params.yaml
       params:
         - name: dataDir
           value: "$(params.dataDir)"
         - name: dataPath
           value: "$(tasks.collect-data.results.data)"
+        - name: keysToExtract
+          value: |
+            [
+              {"resultIndex": 0, "key": ".conforma.workerCount", "default": "4"},
+              {"resultIndex": 1, "key": ".conforma.timeout", "default": "8h0m0s"},
+              {"resultIndex": 2, "key": ".pyxis.secret"},
+              {"resultIndex": 3, "key": ".pyxis.server", "default": "production"}
+            ]
         - name: taskGitUrl
           value: "$(params.taskGitUrl)"
         - name: taskGitRevision
@@ -180,9 +171,6 @@ spec:
           value: "$(tasks.collect-data.results.sourceDataArtifact)"
         - name: trustedArtifactsDebug
           value: "$(params.trustedArtifactsDebug)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - collect-data
     - name: check-data-keys
@@ -192,9 +180,11 @@ spec:
         - name: schema
           value: $(params.taskGitUrl)/raw/$(params.taskGitRevision)/schema/dataKeys.json
         - name: systems
-          value:
-            - fbc
-            - sign
+          value: |
+            [
+              {"systemName": "fbc", "dynamic": false},
+              {"systemName": "sign", "dynamic": false}
+            ]
         - name: ociStorage
           value: $(params.ociStorage)
         - name: sourceDataArtifact
@@ -216,39 +206,6 @@ spec:
           - name: pathInRepo
             value: tasks/managed/check-data-keys/check-data-keys.yaml
         resolver: git
-      workspaces:
-        - name: data
-          workspace: release-workspace
-      runAfter:
-        - collect-data
-    - name: validate-single-component
-      taskRef:
-        resolver: "git"
-        params:
-          - name: url
-            value: $(params.taskGitUrl)
-          - name: revision
-            value: $(params.taskGitRevision)
-          - name: pathInRepo
-            value: tasks/managed/validate-single-component/validate-single-component.yaml
-      params:
-        - name: snapshotPath
-          value: "$(tasks.collect-data.results.snapshotSpec)"
-        - name: ociStorage
-          value: $(params.ociStorage)
-        - name: sourceDataArtifact
-          value: "$(tasks.collect-data.results.sourceDataArtifact)"
-        - name: dataDir
-          value: $(params.dataDir)
-        - name: trustedArtifactsDebug
-          value: "$(params.trustedArtifactsDebug)"
-        - name: taskGitUrl
-          value: "$(params.taskGitUrl)"
-        - name: taskGitRevision
-          value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - collect-data
     - name: verify-conforma
@@ -277,15 +234,16 @@ spec:
         - name: EXTRA_RULE_DATA
           value: $(params.enterpriseContractExtraRuleData)
         - name: TIMEOUT
-          value: $(params.enterpriseContractTimeout)
+          value: "$(tasks.collect-task-params.results.extractedValues[1])"
         - name: WORKERS
-          value: $(params.enterpriseContractWorkerCount)
+          value: "$(tasks.collect-task-params.results.extractedValues[0])"
         - name: SOURCE_DATA_ARTIFACT
           value: "$(tasks.collect-data.results.sourceDataArtifact)"
         - name: TRUSTED_ARTIFACTS_DEBUG
           value: "$(params.trustedArtifactsDebug)"
       runAfter:
-        - validate-single-component
+        - check-data-keys
+        - collect-task-params
     - name: get-ocp-version
       taskRef:
         resolver: "git"
@@ -311,15 +269,9 @@ spec:
           value: "$(params.taskGitUrl)"
         - name: taskGitRevision
           value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - verify-conforma
     - name: update-ocp-tag
-      workspaces:
-        - name: data
-          workspace: release-workspace
       taskRef:
         resolver: "git"
         params:
@@ -350,9 +302,6 @@ spec:
         - collect-data
         - get-ocp-version
     - name: prepare-fbc-release
-      workspaces:
-        - name: data
-          workspace: release-workspace
       taskRef:
         resolver: "git"
         params:
@@ -382,9 +331,6 @@ spec:
       runAfter:
         - update-ocp-tag
     - name: check-fbc-packages
-      workspaces:
-        - name: data
-          workspace: release-workspace
       taskRef:
         resolver: "git"
         params:
@@ -416,9 +362,6 @@ spec:
         - update-ocp-tag
     - name: add-fbc-contribution-to-index-image
       retries: 3
-      workspaces:
-        - name: data
-          workspace: release-workspace
       taskRef:
         resolver: "git"
         params:
@@ -488,9 +431,6 @@ spec:
         - verify-access-to-resources
     - name: sign-index-image
       retries: 3
-      workspaces:
-        - name: data
-          workspace: release-workspace
       taskRef:
         resolver: "git"
         params:
@@ -528,9 +468,9 @@ spec:
         - name: fbcResultsPath
           value: "$(tasks.add-fbc-contribution-to-index-image.results.internalRequestResultsFile)"
         - name: pyxisServer
-          value: $(tasks.collect-pyxis-params.results.server)
+          value: $(tasks.collect-task-params.results.extractedValues[3])
         - name: pyxisSecret
-          value: $(tasks.collect-pyxis-params.results.secret)
+          value: $(tasks.collect-task-params.results.extractedValues[2])
       when:
         - input: "$(tasks.add-fbc-contribution-to-index-image.results.mustSignIndexImage)"
           operator: in
@@ -538,11 +478,8 @@ spec:
       runAfter:
         - extract-requester-from-release
         - add-fbc-contribution-to-index-image
-        - collect-pyxis-params
+        - collect-task-params
     - name: extract-index-image
-      workspaces:
-        - name: data
-          workspace: release-workspace
       taskRef:
         resolver: "git"
         params:
@@ -574,9 +511,6 @@ spec:
       runAfter:
         - add-fbc-contribution-to-index-image
     - name: publish-index-image
-      workspaces:
-        - name: data
-          workspace: release-workspace
       taskRef:
         resolver: "git"
         params:
@@ -589,8 +523,6 @@ spec:
       params:
         - name: dataPath
           value: "$(tasks.collect-data.results.data)"
-        - name: sourceIndex
-          value: $(tasks.extract-index-image.results.indexImageResolved)
         - name: targetIndex
           value: $(tasks.add-fbc-contribution-to-index-image.results.requestTargetIndex)
         - name: internalRequestResultsFile
@@ -646,9 +578,6 @@ spec:
           value: "$(params.taskGitUrl)"
         - name: taskGitRevision
           value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - add-fbc-contribution-to-index-image
     - name: create-pyxis-image
@@ -664,9 +593,9 @@ spec:
             value: tasks/managed/create-pyxis-image/create-pyxis-image.yaml
       params:
         - name: server
-          value: $(tasks.collect-pyxis-params.results.server)
+          value: $(tasks.collect-task-params.results.extractedValues[3])
         - name: pyxisSecret
-          value: $(tasks.collect-pyxis-params.results.secret)
+          value: $(tasks.collect-task-params.results.extractedValues[2])
         - name: rhPush
           value: "true"
         - name: snapshotPath
@@ -685,15 +614,12 @@ spec:
           value: "$(params.taskGitUrl)"
         - name: taskGitRevision
           value: "$(params.taskGitRevision)"
-      workspaces:
-        - name: data
-          workspace: release-workspace
       when:
         - input: $(tasks.add-fbc-contribution-to-index-image.results.mustPublishIndexImage)
           operator: in
           values: ["true"]
       runAfter:
-        - collect-pyxis-params
+        - collect-task-params
         - collect-index-images
         - publish-index-image
     - name: update-cr-status
@@ -725,9 +651,6 @@ spec:
             value: $(params.taskGitRevision)
           - name: pathInRepo
             value: tasks/managed/update-cr-status/update-cr-status.yaml
-      workspaces:
-        - name: data
-          workspace: release-workspace
       runAfter:
         - extract-index-image
   finally:
@@ -741,10 +664,6 @@ spec:
             value: $(params.taskGitRevision)
           - name: pathInRepo
             value: tasks/managed/cleanup-internal-requests/cleanup-internal-requests.yaml
-      when:
-        - input: $(params.postCleanUp)
-          operator: in
-          values: ["true"]
       params:
         - name: pipelineRunUid
           value: $(context.pipelineRun.uid)

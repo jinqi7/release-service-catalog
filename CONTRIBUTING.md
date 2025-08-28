@@ -174,8 +174,8 @@ Tests are defined as Tekton Pipelines inside the `tests` subdirectory of the tas
 directory. Their filenames must match `test*.yaml` and the Pipeline name must be
 the same as the filename (sans `.yaml`).
 
-E.g. to add a test pipeline for `tasks/apply-mapping`, you can add a pipeline
-such as `tasks/apply-mapping/tests/test-apply-mapping.yaml`.
+E.g. to add a test pipeline for `tasks/managed/apply-mapping`, you can add a pipeline
+such as `tasks/managed/apply-mapping/tests/test-apply-mapping.yaml`.
 
 To reference the task under test in a test pipeline, use just the name - the test
 script will install the task CR locally. For example:
@@ -242,10 +242,10 @@ call Pyxis API). The way to do this is to create a file with mock shell function
 as the commands you want to mock) and inject this file to the beginning of each `script` field in
 the task step that needs mocking.
 
-For reference implementation, check [create-pyxis-image/tests/](tasks/create-pyxis-image/tests/). Here's a breakdown of how it's done:
+For reference implementation, check [create-pyxis-image/tests/](tasks/managed/create-pyxis-image/tests/). Here's a breakdown of how it's done:
 
 1. Create a `mocks.sh` file in the tests directory of your task, e.g.
-    `tasks/create-pyxis-image/tests/mocks.sh`. This file will contain the mock function
+    `tasks/managed/create-pyxis-image/tests/mocks.sh`. This file will contain the mock function
     definitions. It also needs to contain a shebang at the top as it will get injected to the top
     of the original script. For example:
 
@@ -356,7 +356,7 @@ Once you have everything ready, you can run the test script and pass task versio
 as arguments, e.g.
 
 ```
-./.github/scripts/test_tekton_tasks.sh tasks/apply-mapping
+./.github/scripts/test_tekton_tasks.sh tasks/managed/apply-mapping
 ```
 
 This will install the task and run all test pipelines matching `tests/test*.yaml`.
@@ -364,7 +364,7 @@ This will install the task and run all test pipelines matching `tests/test*.yaml
 Another option is to run one or more tests directly:
 
 ```
-./.github/scripts/test_tekton_tasks.sh tasks/apply-mapping/tests/test-apply-mapping.yaml
+./.github/scripts/test_tekton_tasks.sh tasks/managed/apply-mapping/tests/test-apply-mapping.yaml
 ```
 
 This will still install the task and run `pre-apply-task-hook.sh` if present, but it will then

@@ -42,20 +42,29 @@ spec:
     - name: dataDir
       description: The location where data will be stored
       type: string
-      default: $(workspaces.data.path)
+      default: /var/workdir/release
     - name: taskGitUrl
       type: string
       description: The url to the git repo where the release-service-catalog tasks and stepactions to be used are stored
     - name: taskGitRevision
       type: string
       description: The revision in the taskGitUrl repo to be used
+    - name: binaries_dir
+      description: The location of github release binaries. Needed for PURL generation
+      type: string
+      default: ""
+    - name: github_release_version
+      description: The version string of the release (from collect-gh-params)
+      type: string
+      default: ""
+    - name: github_release_url
+      description: The url of the release (from collect-gh-params)
+      type: string
+      default: ""
   results:
     - description: Produced trusted data artifact
       name: sourceDataArtifact
       type: string
-  workspaces:
-    - name: data
-      description: The workspace where the data JSON file resides
   volumes:
     - name: workdir
       emptyDir: {}
@@ -71,27 +80,6 @@ spec:
       - name: "DEBUG"
         value: "$(params.trustedArtifactsDebug)"
   steps:
-    - name: skip-trusted-artifact-operations
-      computeResources:
-        limits:
-          memory: 32Mi
-        requests:
-          memory: 32Mi
-          cpu: 20m
-      ref:
-        resolver: "git"
-        params:
-          - name: url
-            value: $(params.taskGitUrl)
-          - name: revision
-            value: $(params.taskGitRevision)
-          - name: pathInRepo
-            value: stepactions/skip-trusted-artifact-operations/skip-trusted-artifact-operations.yaml
-      params:
-        - name: ociStorage
-          value: $(params.ociStorage)
-        - name: workDir
-          value: $(params.dataDir)
     - name: use-trusted-artifact
       computeResources:
         limits:
@@ -113,8 +101,98 @@ spec:
           value: $(params.dataDir)
         - name: sourceDataArtifact
           value: $(params.sourceDataArtifact)
+    - name: validate-cve-issues-in-cves
+      image: quay.io/konflux-ci/release-service-utils:c11bda9ba25f1a2008dadac3d2f9925a8da3bac1
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 10m
+      env:
+        - name: ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: konflux-advisory-jira-secret
+              key: token
+      script: |
+        #!/usr/bin/env bash
+        set -x
+
+        DATA_FILE="$(params.dataDir)/$(params.dataPath)"
+        if [ ! -f "${DATA_FILE}" ] ; then
+            echo "No data JSON was provided."
+            exit 1
+        fi
+
+        if ! jq -e '.releaseNotes.issues.fixed' "$DATA_FILE" > /dev/null; then
+            echo "No issues.fixed found. Skipping CVE validation."
+            exit 0
+        fi
+
+        declare -A RELEASE_CVES
+        NUM_CVES=$(jq '.releaseNotes.cves | length' "${DATA_FILE}")
+        for ((i = 0; i < NUM_CVES; i++)); do
+            cve=$(jq -r --argjson i "$i" '.releaseNotes.cves[$i].key' "${DATA_FILE}")
+            RELEASE_CVES["$cve"]=1
+        done
+
+        CVE_FIELD="customfield_12324749"
+        RC=0
+
+        NUM_ISSUES=$(jq -cr '.releaseNotes.issues.fixed | length' "${DATA_FILE}")
+        for ((i = 0; i < NUM_ISSUES; i++)); do
+            issue=$(jq -c --argjson i "$i" '.releaseNotes.issues.fixed[$i]' "${DATA_FILE}")
+            server=$(jq -r '.source' <<< "$issue")
+            issue_id=$(jq -r '.id' <<< "$issue")
+
+            # Currently only handle issues.redhat.com
+            if [ "$server" != "issues.redhat.com" ] ; then
+                echo "Skipping non-JIRA issue: $issue_id from $server"
+                continue
+            fi
+
+            API_URL="https://${server}/rest/api/2/issue/${issue_id}"
+
+            set +x # Don't leak the ACCESS_TOKEN
+            OUTPUT=$(curl-with-retry --retry 3 -H "Authorization: Bearer $ACCESS_TOKEN" "${API_URL}" 2>/dev/null)
+            CURL_RC=$?
+            set -x
+
+            if [ "$CURL_RC" -ne 0 ] ; then
+                echo "Warning: Could not fetch issue $issue_id from $server. Skipping CVE validation for this issue."
+                continue
+            fi
+
+            # Check if this is a vulnerability issue
+            ISSUE_TYPE=$(jq -r '.fields.issuetype.name' <<< "$OUTPUT")
+            if [ "$ISSUE_TYPE" != "Vulnerability" ] ; then
+                echo "Issue $issue_id is not a Vulnerability (type: $ISSUE_TYPE). Skipping."
+                continue
+            fi
+
+            CVE_ID=$(jq -r --arg field "$CVE_FIELD" '.fields[$field]' <<< "$OUTPUT")
+
+            if [ "$CVE_ID" == "null" ] || [ -z "$CVE_ID" ]; then
+                echo "Warning: Issue $issue_id is a Vulnerability but has no CVE ID. Skipping."
+                continue
+            fi
+
+            # Check if the CVE is present in releaseNotes.cves
+            if [[ ! -v RELEASE_CVES[$CVE_ID] ]]; then
+                echo "Error: Issue $issue lists 'CVE ID' $CVE_ID" \
+                  "but that CVE is not present in the releaseNotes.cves section." | tee -a /tmp/errors.txt
+                RC=1
+            fi
+        done
+
+        if [ "$RC" -ne 0 ] ; then
+            echo "Errors were found in the CVE validation:"
+            cat /tmp/errors.txt
+        fi
+        exit $RC
     - name: populate-release-notes-images
-      image: quay.io/konflux-ci/release-service-utils:ea7868ebdcc7a2116c620255034226611d837f42
+      image: quay.io/konflux-ci/release-service-utils:c11bda9ba25f1a2008dadac3d2f9925a8da3bac1
       computeResources:
         limits:
           memory: 64Mi
@@ -134,8 +212,15 @@ spec:
         # Try to extract the first contentType if it exists
         content_type=$(jq -r '.mapping.components[]?.contentGateway?.contentType // empty' "$DATA_FILE" | head -n1)
 
-        if [ "$content_type" == "binary" ]; then
-            echo "Content type is binary. Skipping image-specific release note generation."
+        # Extract github field from data.json
+        github_field=$(jq -r '.github // empty' "$DATA_FILE")
+        if [[ -n "$github_field" ]]; then
+            echo "Github release. Skipping image-specific release note generation."
+            exit 0
+        fi
+
+        if [[ "$content_type" == "binary" || "$content_type" == "disk-image" ]]; then
+            echo "Content type is ${content_type}. Skipping image-specific release note generation."
             exit 0
         fi
 
@@ -217,8 +302,8 @@ spec:
                     /tmp/data.tmp && mv /tmp/data.tmp "${DATA_FILE}"
             done
         done
-    - name: populate-release-notes-binaries
-      image: quay.io/konflux-ci/release-service-utils:ea7868ebdcc7a2116c620255034226611d837f42
+    - name: populate-release-notes-artifacts
+      image: quay.io/konflux-ci/release-service-utils:c11bda9ba25f1a2008dadac3d2f9925a8da3bac1
       computeResources:
         limits:
           memory: 32Mi
@@ -238,8 +323,8 @@ spec:
         # Try to extract the first contentType if it exists
         content_type=$(jq -r '.mapping.components[]?.contentGateway?.contentType // empty' "$DATA_FILE" | head -n1)
 
-        if [ "$content_type" != "binary" ]; then
-            echo "Not binary content. Skipping binary-specific logic."
+        if [ "$content_type" != "binary" ] && [ "$content_type" != "disk-image" ]; then
+            echo "Not binary or disk-image content. Skipping artifact-specific logic."
             exit 0
         fi
 
@@ -248,6 +333,26 @@ spec:
             echo "No valid snapshot file was provided."
             exit 1
         fi
+
+        append_artifact_entry() {
+          local component="$1" arch="$2" os="$3" purl="$4"
+          local jsonString
+          jsonString=$(jq -cn \
+            --arg component "$component" \
+            --arg arch "$arch" \
+            --arg os "$os" \
+            --arg purl "$purl" \
+            '{"architecture": $arch, "os": $os, "purl": $purl, "component": $component}')
+
+          if [ "$(jq '.cves.fixed | length' <<< "$CVEsJson")" -gt 0 ]; then
+            jsonString=$(jq --argjson cves "$CVEsJson" '. += $cves' <<< "$jsonString")
+          fi
+
+          jq --argjson content "$jsonString" \
+              '.releaseNotes.content.artifacts += [$content]' \
+              "${DATA_FILE}" > /tmp/data.tmp && \
+              mv /tmp/data.tmp "${DATA_FILE}"
+        }
 
         NUM_COMPONENTS=$(jq '.components | length' "${SNAPSHOT_FILE}")
         for ((i = 0; i < NUM_COMPONENTS; i++))
@@ -268,42 +373,171 @@ spec:
                 CVEsJson=$(jq --argjson cve "$cveJson" '.cves.fixed += $cve' <<< "$CVEsJson")
             done
 
-            # Get the number of files for this component
-            FILES_LENGTH=$(jq --arg name "$name" \
-              '[.mapping.components[]
-                | select(.name == $name)
-                | .files
-                | length][0]' "$DATA_FILE")
+            if [ "$content_type" = "binary" ]; then
+                # Get the number of files for this component (binaries use files structure)
+                FILES_LENGTH=$(jq --arg name "$name" \
+                  '[.mapping.components[]
+                    | select(.name == $name)
+                    | .files
+                    | length][0]' "$DATA_FILE")
 
-            for ((k = 0; k < FILES_LENGTH; k++)); do
-                file=$(jq -c --arg name "$name" --argjson k "$k" \
-                    '.mapping.components[]
-                      | select(.name == $name)
-                      | .files[$k]' "$DATA_FILE")
-                arch=$(jq -r '.arch' <<< "$file")
-                os=$(jq -r '.os' <<< "$file")
+                for ((k = 0; k < FILES_LENGTH; k++)); do
+                    file=$(jq -c --arg name "$name" --argjson k "$k" \
+                        '.mapping.components[]
+                          | select(.name == $name)
+                          | .files[$k]' "$DATA_FILE")
+                    arch=$(jq -r '.arch' <<< "$file")
+                    os=$(jq -r '.os' <<< "$file")
 
-                # This will be filled in with a later task after signing so we have an accurate checksum
-                purl="placeholder"
+                    # This will be filled in with a later task after signing so we have an accurate checksum
+                    purl="placeholder"
 
-                jsonString=$(jq -cn \
-                  --arg component "$name" \
-                  --arg arch "$arch" \
-                  --arg os "$os" \
-                  --arg purl "$purl" \
-                  '{"architecture": $arch, "os": $os, "purl": $purl, "component": $component}')
+                    append_artifact_entry "$name" "$arch" "$os" "$purl"
+                done
+            else
+                # Get the number of staged files for this component (disk-images use staged.files structure)
+                FILES_LENGTH=$(jq --arg name "$name" \
+                  '[.mapping.components[]
+                    | select(.name == $name)
+                    | .staged.files
+                    | length][0]' "$DATA_FILE")
 
-                if [ "$(jq '.cves.fixed | length' <<< "$CVEsJson")" -gt 0 ]; then
-                    jsonString=$(jq --argjson cves "$CVEsJson" '. += $cves' <<< "$jsonString")
-                fi
+                for ((k = 0; k < FILES_LENGTH; k++)); do
+                    file=$(jq -c --arg name "$name" --argjson k "$k" \
+                        '.mapping.components[]
+                          | select(.name == $name)
+                          | .staged.files[$k]' "$DATA_FILE")
+                    filename=$(jq -r '.filename' <<< "$file")
 
-                jq --argjson content "$jsonString" '.releaseNotes.content.artifacts += [$content]' "${DATA_FILE}" > \
-                    /tmp/data.tmp && mv /tmp/data.tmp "${DATA_FILE}"
-            done
+                    # Extract architecture from filename (disk images typically have arch in filename)
+                    arch="unknown"  # Default
+                    if [[ "$filename" == *"aarch64"* ]]; then
+                        arch="aarch64"
+                    elif [[ "$filename" == *"x86_64"* ]]; then
+                        arch="x86_64"
+                    fi
+
+                    # Determine OS based on file extension
+                    os="linux"  # Default for disk images
+
+                    # Create PURL placeholder for disk-image
+                    # Complete PURL with real CDN URLs will be built by create-advisory update-purl step
+                    purl="placeholder"
+
+                    append_artifact_entry "$name" "$arch" "$os" "$purl"
+                done
+            fi
+        done
+    - name: populate-release-notes-github
+      image: quay.io/konflux-ci/release-service-utils:c11bda9ba25f1a2008dadac3d2f9925a8da3bac1
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 10m
+      script: |
+        #!/usr/bin/env bash
+        set -ex
+
+        DATA_FILE="$(params.dataDir)/$(params.dataPath)"
+        if [ ! -f "${DATA_FILE}" ] ; then
+            echo "No data JSON was provided."
+            exit 1
+        fi
+
+        # Extract github field from data.json
+        github_field=$(jq -r '.github // empty' "$DATA_FILE")
+        if [[ -z "$github_field" ]]; then
+            echo "Not a github release. Skipping github-specific release note generation."
+            exit 0
+        fi
+
+        SNAPSHOT_FILE="$(params.dataDir)/$(params.snapshotPath)"
+        if [ ! -f "${SNAPSHOT_FILE}" ] ; then
+            echo "No valid snapshot file was provided."
+            exit 1
+        fi
+
+        # github releases are single-component snapshots
+        # get component name from snapshot file
+        name=$(jq -r '.components[0].name' "${SNAPSHOT_FILE}")
+        # Construct CVE json
+        CVEsJson='{"cves":{"fixed":{}}}'
+        CVES=$(jq -c '[.releaseNotes.cves[]? | select(.component=="'"$name"'")]' "${DATA_FILE}")
+        NUM_CVES=$(jq 'length' <<< "$CVES")
+        for ((j = 0; j < NUM_CVES; j++)); do
+            cve=$(jq -c --argjson j "$j" '.[$j]' <<< "$CVES")
+            cveJson=$(jq -n \
+                --arg id "$(jq -r '.key' <<< "$cve")" \
+                --argjson packages "$(jq -c '.packages // []' <<< "$cve")" \
+                '{($id): {"packages": $packages}}')
+            CVEsJson=$(jq --argjson cve "$cveJson" '.cves.fixed += $cve' <<< "$CVEsJson")
         done
 
+        GITHUB_RELEASE_VERSION="$(params.github_release_version)"
+        GITHUB_RELEASE_URL="$(params.github_release_url)"
+
+        # check that params datadir params binaries_dir exists
+        if [ ! -d "$(params.dataDir)/$(params.binaries_dir)" ] ; then
+            echo "Binaries directory does not exist."
+            exit 1
+        fi
+
+        # get the checksum file from the binaries directory
+        CHECKSUM_FILE=$(find "$(params.dataDir)/$(params.binaries_dir)" -name '*_SHA256SUMS')
+        if [ ! -f "${CHECKSUM_FILE}" ] ; then
+            echo "No checksum file was provided."
+            exit 1
+        fi
+
+        # create a map of filename to checksum
+        declare -A CHECKSUM_MAP
+
+        while read -r checksum filename; do
+          # Ignore empty lines and manifest file
+          [[ -z "$filename" ]] && continue
+          [[ "$filename" == *_manifest.json ]] && continue
+          CHECKSUM_MAP["$filename"]="$checksum"
+        done < "${CHECKSUM_FILE}"
+
+        # Parse owner/repo from the release URL
+        owner_repo=$(echo "$GITHUB_RELEASE_URL" | sed -E 's#https://github.com/([^/]+/[^/]+).*#\1#')
+
+        # Get the number of files for this component
+        FILES_LENGTH=$(jq --arg name "$name" \
+          '[.mapping.components[]
+            | select(.name == $name)
+            | .files
+            | length][0]' "$DATA_FILE")
+        for ((k = 0; k < FILES_LENGTH; k++)); do
+            file=$(jq -c --arg name "$name" --argjson k "$k" \
+                '.mapping.components[]
+                  | select(.name == $name)
+                  | .files[$k]' "$DATA_FILE")
+            file_source=$(jq -r '.source' <<< "$file")
+            filename=$(basename "$file_source")
+            arch=$(jq -r '.arch' <<< "$file")
+            os=$(jq -r '.os' <<< "$file")
+            # Ignore manifest files
+            [[ "$filename" == *_manifest.json ]] && continue
+            checksum="${CHECKSUM_MAP[$filename]}"
+            download_url="https://github.com/$owner_repo/releases/download/$GITHUB_RELEASE_VERSION/$filename"
+            purl="pkg:generic/$name@$GITHUB_RELEASE_VERSION?checksum=$checksum&download_url=$download_url"
+            jsonString=$(jq -cn \
+                --arg component "$name" \
+                --arg arch "$arch" \
+                --arg os "$os" \
+                --arg purl "$purl" \
+                '{"architecture": $arch, "os": $os, "purl": $purl, "component": $component}')
+            if [ "$(jq '.cves.fixed | length' <<< "$CVEsJson")" -gt 0 ]; then
+                jsonString=$(jq --argjson cves "$CVEsJson" '. += $cves' <<< "$jsonString")
+            fi
+            jq --argjson content "$jsonString" '.releaseNotes.content.artifacts += [$content]' "${DATA_FILE}" > \
+                /tmp/data.tmp && mv /tmp/data.tmp "${DATA_FILE}"
+        done
     - name: populate-release-notes-type-and-references
-      image: quay.io/konflux-ci/release-service-utils:ea7868ebdcc7a2116c620255034226611d837f42
+      image: quay.io/konflux-ci/release-service-utils:c11bda9ba25f1a2008dadac3d2f9925a8da3bac1
       computeResources:
         limits:
           memory: 32Mi
@@ -368,26 +602,5 @@ spec:
           value: $(params.ociStorage)
         - name: workDir
           value: $(params.dataDir)
-        - name: sourceDataArtifact
-          value: $(results.sourceDataArtifact.path)
-    - name: patch-source-data-artifact-result
-      computeResources:
-        limits:
-          memory: 32Mi
-        requests:
-          memory: 32Mi
-          cpu: 20m
-      ref:
-        resolver: "git"
-        params:
-          - name: url
-            value: $(params.taskGitUrl)
-          - name: revision
-            value: $(params.taskGitRevision)
-          - name: pathInRepo
-            value: stepactions/patch-source-data-artifact-result/patch-source-data-artifact-result.yaml
-      params:
-        - name: ociStorage
-          value: $(params.ociStorage)
         - name: sourceDataArtifact
           value: $(results.sourceDataArtifact.path)

@@ -5,7 +5,7 @@ set -eux
 function git() {
   echo "Mock git called with: $*"
 
-  if [[ "$*" == *"clone"* ]]; then
+  if [[ "$1" == "clone" ]]; then
     gitRepo=$(echo "$*" | cut -f5 -d/ | cut -f1 -d.)
     mkdir -p "$gitRepo"/schema
     echo '{"$schema": "http://json-schema.org/draft-07/schema#","type": "object", "properties":{}}' > "$gitRepo"/schema/advisory.json
@@ -19,7 +19,13 @@ function git() {
     touch -d "@1712012344" "$gitRepo"/data/advisories/dev-tenant/2024/1452
     touch -d "@1708012343" "$gitRepo"/data/advisories/dev-tenant/2025/1602
     touch -d "@1704012342" "$gitRepo"/data/advisories/dev-tenant/2024/1442
-
+  elif [[ "$1" == "sparse-checkout" ]]; then
+    : # no-op
+  elif [[ "$1" == "ls-tree" ]]; then
+    echo data/advisories/dev-tenant/2025/1602/advisory.yaml
+    echo data/advisories/dev-tenant/2025/1601/advisory.yaml
+    echo data/advisories/dev-tenant/2024/1452/advisory.yaml
+    echo data/advisories/dev-tenant/2024/1442/advisory.yaml
   elif [[ "$*" == *"failing-tenant"* ]]; then
     echo "Mocking failing git command" && false
   else
@@ -116,3 +122,18 @@ function kubectl() {
     /usr/bin/kubectl $*
   fi
 }
+
+function check-jsonschema() {
+  echo "Mock check-jsonschema called with: $*"
+
+  if [[ "$*" == *"schema-tenant"* ]]; then
+    # Use a bogus file so it fails validation
+    echo "A:B:C" > /tmp/fail.yaml
+    /usr/local/bin/check-jsonschema "$1" "$2" /tmp/fail.yaml
+  else
+    /usr/local/bin/check-jsonschema $*
+  fi
+}
+
+# The retry script won't see the kinit function unless we export it
+export -f kinit

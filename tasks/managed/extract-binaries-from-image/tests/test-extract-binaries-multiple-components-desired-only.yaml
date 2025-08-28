@@ -7,8 +7,6 @@ spec:
   description: |
     Run the extract-binaries-from-image task with three components in the snapshot
     but only extract binaries for the desired components. Result should be 2.
-  workspaces:
-    - name: tests-workspace
   params:
     - name: ociStorage
       description: The OCI repository where the Trusted Artifacts are stored.
@@ -31,12 +29,7 @@ spec:
       type: string
   tasks:
     - name: setup
-      workspaces:
-        - name: data
-          workspace: tests-workspace
       taskSpec:
-        workspaces:
-          - name: data
         results:
           - name: sourceDataArtifact
             type: string
@@ -131,14 +124,6 @@ spec:
               mkdir -p "$TAR_IN2"/my-binaries-path
               echo text2 > "$TAR_IN2"/my-binaries-path/file2.txt
               tar czf 2222 -C "$TAR_IN2" my-binaries-path
-          - name: skip-trusted-artifact-operations
-            ref:
-              name: skip-trusted-artifact-operations
-            params:
-              - name: ociStorage
-                value: $(params.ociStorage)
-              - name: workDir
-                value: $(params.dataDir)
           - name: create-trusted-artifact
             ref:
               name: create-trusted-artifact
@@ -149,14 +134,6 @@ spec:
                 value: $(params.dataDir)
               - name: sourceDataArtifact
                 value: $(results.sourceDataArtifact.path)
-          - name: patch-source-data-artifact-result
-            ref:
-              name: patch-source-data-artifact-result
-            params:
-              - name: ociStorage
-                value: $(params.ociStorage)
-              - name: sourceDataArtifact
-                value: $(results.sourceDataArtifact.path)
     - name: run-task
       taskRef:
         name: extract-binaries-from-image
@@ -165,8 +142,6 @@ spec:
           value: my-binaries-path
         - name: snapshotPath
           value: $(context.pipelineRun.uid)/snapshot.json
-        - name: subdirectory
-          value: my-subdir
         - name: dataPath
           value: $(context.pipelineRun.uid)/data.json
         - name: ociStorage
@@ -183,15 +158,9 @@ spec:
           value: "http://localhost"
         - name: taskGitRevision
           value: "main"
-      workspaces:
-        - name: data
-          workspace: tests-workspace
       runAfter:
         - setup
     - name: check-result
-      workspaces:
-        - name: data
-          workspace: tests-workspace
       params:
         - name: binaries_path
           value: $(tasks.run-task.results.binaries_path)
@@ -199,6 +168,8 @@ spec:
           value: "$(tasks.run-task.results.sourceDataArtifact)=$(params.dataDir)"
         - name: dataDir
           value: $(params.dataDir)
+        - name: pipelineRunUid
+          value: $(context.pipelineRun.uid)
       taskSpec:
         params:
           - name: binaries_path
@@ -207,8 +178,8 @@ spec:
             type: string
           - name: dataDir
             type: string
-        workspaces:
-          - name: data
+          - name: pipelineRunUid
+            type: string
         volumes:
           - name: workdir
             emptyDir: {}
@@ -224,14 +195,6 @@ spec:
             - name: "DEBUG"
               value: "$(params.trustedArtifactsDebug)"
         steps:
-          - name: skip-trusted-artifact-operations
-            ref:
-              name: skip-trusted-artifact-operations
-            params:
-              - name: ociStorage
-                value: $(params.ociStorage)
-              - name: workDir
-                value: $(params.dataDir)
           - name: use-trusted-artifact
             ref:
               name: use-trusted-artifact
@@ -255,7 +218,7 @@ spec:
                 exit 1
               fi
 
-              if [ "$(params.binaries_path)" != "my-subdir/binaries" ]; then
+              if [ "$(params.binaries_path)" != "$(params.pipelineRunUid)/binaries" ]; then
                   echo "Error: Unexpected binaries_path result"
                   exit 1
               fi

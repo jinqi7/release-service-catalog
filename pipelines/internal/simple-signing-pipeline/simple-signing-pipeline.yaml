@@ -66,8 +66,6 @@ spec:
           - name: pathInRepo
             value: tasks/internal/request-and-upload-signature/request-and-upload-signature.yaml
       params:
-        - name: config_map_name
-          value: $(params.config_map_name)
         - name: manifest_digests
           value: $(params.manifest_digests)
         - name: references
@@ -100,10 +98,6 @@ spec:
           value: $(tasks.collect-simple-signing-params.results.pyxis_ssl_key_file_name)
         - name: pyxis_url
           value: $(tasks.collect-simple-signing-params.results.pyxis_url)
-        - name: taskGitUrl
-          value: $(params.taskGitUrl)
-        - name: taskGitRevision
-          value: $(params.taskGitRevision)
       workspaces:
         - name: data
           workspace: pipeline

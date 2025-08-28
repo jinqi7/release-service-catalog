@@ -13,7 +13,7 @@ spec:
   params:
     - name: releaseNotesImages
       type: string
-      description: Json array of image specific details for the advisory
+      description: Base64 string of gzipped JSON array of image specific details for the advisory
     - name: taskGitUrl
       type: string
       description: The url to the git repo where the release-service-catalog tasks to be used are stored

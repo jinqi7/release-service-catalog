@@ -6,7 +6,7 @@ metadata:
 spec:
   description: |
     Run the create-advisory task and have it fail. In this scenario it fails because an advisory with year 2024
-    and the live id 1352 already exists (created in the git clone mock)
+    and the live id 1452 already exists (returned in the git ls-tree mock)
   tasks:
     - name: run-task
       taskRef:
@@ -52,7 +52,7 @@ spec:
             type: string
         steps:
           - name: check-result
-            image: quay.io/konflux-ci/release-service-utils:7addbf5630418cea87bf66df33a05fdd57e43728
+            image: quay.io/konflux-ci/release-service-utils:5946bb2a4c353004b05dd1edbecf79fbceadb69c
             script: |
               #!/usr/bin/env bash
               set -eux

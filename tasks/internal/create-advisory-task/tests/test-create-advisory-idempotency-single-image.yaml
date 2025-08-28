@@ -55,7 +55,7 @@ spec:
             type: string
         steps:
           - name: verify-idempotency
-            image: quay.io/konflux-ci/release-service-utils:7addbf5630418cea87bf66df33a05fdd57e43728
+            image: quay.io/konflux-ci/release-service-utils:5946bb2a4c353004b05dd1edbecf79fbceadb69c
             script: |
               #!/usr/bin/env bash
               set -eux
