@@ -6,7 +6,7 @@ metadata:
 spec:
   description: |
     Run the collect-data task with collectors and verify that
-    data from resources override the collectors data.
+    data from resources combine with the collectors data.
   params:
     - name: ociStorage
       description: The OCI repository where the Trusted Artifacts are stored.
@@ -221,7 +221,8 @@ spec:
               test "$(jq -cr --sort-keys . "$(params.dataDir)/$(params.data)")" \
                == "$(jq -cr --sort-keys <<< '{"releaseNotes":{"cves":[{"component":"my-component","key":"FOO-3444"}],
                   "foobar":[{"component":"my-component","key":"FOO-4333"}],
-                  "issues":{"fixed":[{"id":"BAR-1234","source":"issues.redhat.com"}]}}}' | jq -cr)"
+                  "issues":{"fixed":[{"id":"BAR-1234","source":"issues.redhat.com"},
+                  {"id":"FOO-1234","source":"issues.redhat.com"}]}}}' | jq -cr)"
   finally:
     - name: cleanup
       taskSpec:
