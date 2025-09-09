@@ -223,13 +223,14 @@ spec:
             "{.spec.data}")
 
         # Merge collectors and Release keys. Release has higher priority
-        merged_output=$(merge-json "$collectors_result" "$release_result")
+        merged_output=$(merge-json1 "$collectors_result" "$release_result")
 
         # Merge now with ReleasePlan keys. ReleasePlan has higher priority
-        merged_output=$(merge-json "$merged_output" "$release_plan_result")
+        merged_output=$(merge-json1 "$merged_output" "$release_plan_result")
 
         # Finally merge with ReleasePlanAdmission keys. ReleasePlanAdmission has higher priority
-        merged_output=$(merge-json "$merged_output" "$release_plan_admission_result")
+        merged_output=$(merge-json1 "$merged_output" "$release_plan_admission_result")
+
 
         DATA_PATH="$(params.subdirectory)/data.json"
         echo -n "$DATA_PATH" > "$(results.data.path)"
