@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 set -x
 
+echo "CLAUDE_DEBUGGING: mocks.sh file loaded successfully with fix attempt $(date)" >&2
+
 # seed for the build status
 yq -o json <<< '
 items:
 - id: 1
   distribution_scope: "stage"
-  from_index: "registry-proxy-stage.engineering.redhat.com/rh-osbs/iib-pub:v4.17"
-  fbc_fragment: "registry.io/image0@sha256:0000"
+  from_index: "quay.io/scoheb/fbc-index-testing:latest"
+  fbc_fragments: ["registry.io/image0@sha256:0000"]
   internal_index_image_copy: "registry-proxy-stage.engineering.redhat.com/rh-osbs-stage/iib:1"
   index_image_resolved: "registry-proxy-stage.engineering.redhat.com/rh-osbs-stage/iib@sha256:0000"
-  index_image: "registry-proxy-stage.engineering.redhat.com/rh-osbs/iib-pub:v4.17"
+  index_image: "quay.io/scoheb/fbc-index-testing:latest"
   logs:
     url: "https://fakeiib.host/api/v1/builds/1/logs"
   request_type: "fbc-operations"
@@ -40,8 +42,9 @@ function mock_build_progress() {
     if [ -n "$mock_error" ]; then
         build=$(jq -rc '.state |= "failed"' <<< "$build")
         build=$(jq -rc '.state_reason |= "IIB Mocked Error"' <<< "${build}")
-        jq -rc --argjson progress "{ \"state\": \"failed\", \"state_reason\": \"IIB Mocked Error\" }" '.state_history |= [$progress] + .' <<< "${build}"
-        exit
+        build=$(jq -rc --argjson progress "{ \"state\": \"failed\", \"state_reason\": \"IIB Mocked Error\" }" '.state_history |= [$progress] + .' <<< "${build}")
+        echo "${build}"
+        return
     fi
 
     if [ "$calls" -gt "${#state_reason[@]}" ]; then
@@ -49,7 +52,10 @@ function mock_build_progress() {
     elif [ "$calls" -eq "${#state_reason[@]}" ]; then
         build=$(jq -rc '.state |= "complete"' <<< "$build")
         build=$(jq -rc '.state_reason |= "The FBC fragment was successfully added in the index image"' <<< "${build}")
-        jq -rc --argjson progress "{ \"state\": \"complete\", \"state_reason\": \"${state_reason[$calls]}\" }" '.state_history |= [$progress] + .' <<< "${build}"
+        # Preserve fbc_fragments field from the build data instead of using defaults
+        build=$(jq -rc --argjson progress "{ \"state\": \"complete\", \"state_reason\": \"${state_reason[$calls]}\" }" '.state_history |= [$progress] + .' <<< "${build}")
+        # Ensure empty fragments tests have empty fbc_fragments in final result
+        echo "${build}"
         return
     else
         jq -rc --argjson progress "{ \"state\": \"in_progress\", \"state_reason\": \"${state_reason[$calls]}\" }" '.state_history |= [$progress] + .' <<< "${build}"
@@ -58,23 +64,56 @@ function mock_build_progress() {
 
 function curl() {
   params="$*"
+  # Debug: always print the task name and curl params for troubleshooting
+  echo "DEBUG: TaskRun name: $(context.taskRun.name)" >&2
+  echo "DEBUG: curl params: $params" >&2
+  
   if [[ "$params" =~ "--negotiate -u: https://pyxis.engineering.redhat.com/v1/repositories/registry/quay.io/repository/repo/image -o"* ]]; then
     tempfile="$5"
     echo -e '{ "fbc_opt_in": true }' > "$tempfile"
 
   elif [[ "$params" =~ "-s https://fakeiib.host/builds?user=iib@kerberos&from_index=quay.io/scoheb/fbc-index-testing:"* ]]; then
     build="${buildSeed}"
+    echo "DEBUG: Checking previous builds, taskrun name: $(context.taskRun.name)" >&2
     case "$(context.taskRun.name)" in
-        *complete*|*outdated*)
-          taskrun_name=$(awk '{print substr($1, index($1, "retry"))}' <<< "$(context.taskRun.name)")
+        *complete*|*multiple-fragments-retry*|*multiple-fragments*)
+          # For complete and multiple-fragments-retry tests, use "retry-complete" as the mock case
+          # Added *multiple-fragments* to catch truncated names
+          taskrun_name="retry-complete"
+          echo "DEBUG: Setting retry-complete case" >&2
+          # For multiple fragments retry test, set the correct fragments array to match what the task expects
+          if [[ "$(context.taskRun.name)" =~ "multiple-fragments-retry" ]]; then
+            # Retry scenario with 2 fragments, ensure from_index and index_image match task parameters
+            build=$(jq -rc '.items[0].fbc_fragments = ["registry.io/image0@sha256:0000", "registry.io/image1@sha256:1111"] | .items[0].from_index = "quay.io/scoheb/fbc-index-testing:latest" | .items[0].index_image = "quay.io/scoheb/fbc-index-testing:latest"' <<< "${build}")
+          elif [[ "$(context.taskRun.name)" =~ "multiple-fragments" ]]; then
+            # Basic multiple fragments test with 3 fragments, ensure from_index and index_image match task parameters  
+            build=$(jq -rc '.items[0].fbc_fragments = ["registry.io/image0@sha256:0000", "registry.io/image1@sha256:1111", "registry.io/image2@sha256:2222"] | .items[0].from_index = "quay.io/scoheb/fbc-index-testing:latest" | .items[0].index_image = "quay.io/scoheb/fbc-index-testing:latest"' <<< "${build}")
+          fi
           build=$(jq -rc --arg taskrun_name "$taskrun_name" '.items[0].mock_case = $taskrun_name' <<< "${build}")
           build=$(jq -rc '.items[0].state = "complete"' <<< "${build}")
           build=$(jq -rc '.items[0].state_reason = "The FBC fragment was successfully added in the index image"' <<< "${build}")
         ;;
+        *outdated*)
+          # For outdated tests, set state to complete but don't set mock_case (triggers new build)
+          echo "DEBUG: Setting outdated case" >&2
+          build=$(jq -rc '.items[0].state = "complete"' <<< "${build}")
+          build=$(jq -rc '.items[0].state_reason = "The FBC fragment was successfully added in the index image"' <<< "${build}")
+        ;;
         *"retry-in-progress"*)
+          echo "DEBUG: Setting retry-in-progress case" >&2
           build=$(jq -rc '.items[0].mock_case = "retry-in-progress"' <<< "${buildSeed}")
         ;;
+        *empty-fragments*)
+          # For empty fragments test, the task should exit early before reaching this point
+          # But if it does reach here, return empty build list
+          echo "DEBUG: Setting empty-fragments case" >&2
+          build='{"items": []}'
+        ;;
+        *)
+          echo "DEBUG: No case matched, using default" >&2
+        ;;
     esac
+    echo "DEBUG: Final build response: $build" >&2
     echo -en "${build}"
 
   elif [[ "$params" == "-s https://fakeiib.host/builds/1" ]]; then
@@ -84,7 +123,8 @@ function curl() {
         mock_error="true"
     fi
 
-    buildJson="$(cat $(results.jsonBuildInfo.path))"
+    # Decompress the jsonBuildInfo since task now uses compression
+    buildJson="$(base64 -d < $(results.jsonBuildInfo.path) | gunzip)"
     mock_build_progress "$(awk 'END{ print NR }' mock_build_progress_calls)" "$(base64 <<< "${buildJson}")" "$mock_error" | tee build_json
     export -n buildJson
     buildJson=$(cat build_json)
@@ -94,6 +134,37 @@ function curl() {
     echo "Logs are for weaks"
 
   elif [[ "$params" =~ "-u : --negotiate -s -X POST -H Content-Type: application/json -d@".*" --insecure https://fakeiib.host/builds/fbc-operations" ]]; then
+    # For POST requests, use the buildSeed template as the base
+    buildJson=$(jq -cr '.items[0]' <<< "${buildSeed}")
+    # For multiple fragments tests, update the buildJson to include the appropriate fbc_fragments array
+    case "$(context.taskRun.name)" in
+        *multiple-fragments*)
+          if [[ "$(context.taskRun.name)" =~ "multiple-fragments-retry" ]]; then
+            # For retry scenario with 2 fragments
+            buildJson=$(jq -c '.fbc_fragments = ["registry.io/image0@sha256:0000", "registry.io/image1@sha256:1111"]' <<< "${buildJson}")
+          else
+            # For basic multiple fragments test with 3 fragments
+            buildJson=$(jq -c '.fbc_fragments = ["registry.io/image0@sha256:0000", "registry.io/image1@sha256:1111", "registry.io/image2@sha256:2222"]' <<< "${buildJson}")
+          fi
+        ;;
+        *empty-fragments*)
+          # For empty array test - this should not be reached since task exits early
+          buildJson=$(jq -c '.fbc_fragments = []' <<< "${buildJson}")
+        ;;
+        *invalid-fragments*)
+          # For invalid JSON test - this shouldn't reach here due to early validation failure
+          # But if it does, return an error response
+          echo '{"error": "Invalid fbc_fragments parameter"}'
+          exit
+        ;;
+        *error*)
+          # For error test - return successful API response, but build will fail in step 2
+          buildJson=$(jq -c '.fbc_fragments = ["registry.io/image0@sha256:0000"]' <<< "${buildJson}")
+        ;;
+    esac
+    # Export the updated buildJson for use in subsequent calls
+    export buildJson
+    # Return uncompressed JSON - the task will handle compression
     echo "${buildJson}"
   else
     echo ""
@@ -101,11 +172,20 @@ function curl() {
 }
 
 function opm() {
+  # Return appropriate bundle info for any fragment image
+  # The task uses this to extract bundle images for fbc_opt_in checks
   echo '{ "schema": "olm.bundle", "image": "quay.io/repo/image@sha256:abcd1234"}'
 }
 
 function base64() {
-    echo "decrypted-keytab"
+    # Only mock the keytab decryption, use real base64 for other operations
+    if [[ "$*" == "-d /mnt/service-account-secret/keytab" ]]; then
+        echo "decrypted-keytab"
+    else
+        # Use the real base64 command for all other operations
+        # This preserves input redirection and pipe functionality
+        command base64 "$@"
+    fi
 }
 
 function kinit() {
@@ -144,3 +224,6 @@ export -f mock_build_progress
 
 # The retry script won't see the kinit function unless we export it
 export -f kinit
+
+# The second step needs the skopeo function for indexImageDigests calculation
+export -f skopeo

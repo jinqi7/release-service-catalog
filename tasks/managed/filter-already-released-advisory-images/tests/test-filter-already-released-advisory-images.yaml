@@ -76,12 +76,22 @@ spec:
                 "components": [
                   {
                     "name": "old-component",
-                    "repository": "quay.io/redhat-pending/repo",
+                    "repositories": [
+                      {
+                        "url": "quay.io/redhat-pending/repo",
+                        "rh-registry-repo": "quay.io/redhat-pending/repo"
+                      }
+                    ],
                     "containerImage": "quay.io/redhat-pending/repo@sha256:abc123"
                   },
                   {
                     "name": "new-component",
-                    "repository": "quay.io/redhat-pending/repo2",
+                    "repositories": [
+                      {
+                        "url": "quay.io/redhat-pending/repo2",
+                        "rh-registry-repo": "quay.io/redhat-pending/repo2"
+                      }
+                    ],
                     "containerImage": "quay.io/redhat-pending/repo2@sha256:def456"
                   }
                 ]

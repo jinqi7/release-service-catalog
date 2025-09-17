@@ -64,9 +64,7 @@ spec:
                   {
                     "name": "comp0",
                     "containerImage": "fail.io/image0@sha256:0000",
-                    "repository": "prod-registry.io/prod-location0",
-                    "updatedTargetIndex": "quay.io/scoheb/fbc-target-index-testing:v4.12",
-                    "ocpVersion": "v4.12"
+                    "repository": "prod-registry.io/prod-location0"
                   }
                 ]
               }
@@ -121,6 +119,8 @@ spec:
           value: "http://localhost"
         - name: taskGitRevision
           value: "main"
+        - name: ocpVersion
+          value: "v4.13"
       runAfter:
         - setup
   finally:
@@ -133,4 +133,6 @@ spec:
               #!/usr/bin/env sh
               set -eux
               
-              kubectl delete internalrequests --all
+              # Only delete InternalRequests created by this specific pipeline run
+              kubectl delete internalrequests -l \
+                "internal-services.appstudio.openshift.io/pipelinerun-uid=$(context.pipelineRun.uid)" || true

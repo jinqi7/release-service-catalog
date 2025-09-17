@@ -12,8 +12,8 @@ spec:
       taskRef:
         name: update-fbc-catalog-task
       params:
-        - name: fbcFragment
-          value: "registry.io/image0@sha256:0000"
+        - name: fbcFragments
+          value: '["registry.io/image0@sha256:0000"]'
         - name: fromIndex
           value: "quay.io/scoheb/fbc-index-testing:error"
         - name: targetIndex
@@ -64,12 +64,17 @@ spec:
                 value: $(params.genericResult)
               - name: JSON_BUILDINFO
                 value: $(params.jsonBuildInfo)
+              - name: MOCK_BEHAVIOR
+                value: '{"case": "default", "error": true, "fragments": ["registry.io/image0@sha256:0000"]}'
             script: |
               #!/bin/bash
               set -x
 
+              # Decompress jsonBuildInfo since task now uses compression
+              decompressed_json="$(base64 -d <<< "${JSON_BUILDINFO}" | gunzip)"
+              
               # the jsonBuild mockes has 12 keys on it
-              keyLength=$(jq '. | length' <<< "${JSON_BUILDINFO}")
+              keyLength=$(jq '. | length' <<< "${decompressed_json}")
               if [ "$keyLength" -ne 12 ]; then
                 echo "The task did not save a valid json in jsonBuildInfo result"
                 exit 1

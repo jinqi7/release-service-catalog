@@ -1,0 +1,30 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-update-fbc-catalog-invalid-fragments-array
+  annotations:
+    test/assert-task-failure: "run-task"
+spec:
+  description: Tests the pipeline error handling when fbcFragments parameter contains invalid JSON (not a JSON array).
+    This test validates that the task fails gracefully with proper error message when given a malformed fbcFragments
+    parameter that is not a valid JSON array format.
+  tasks:
+    - name: run-task
+      taskRef:
+        name: update-fbc-catalog-task
+      params:
+        - name: fbcFragments
+          value: 'registry.io/image0@sha256:0000'  # Invalid - not a JSON array
+        - name: fromIndex
+          value: "quay.io/scoheb/fbc-index-testing:latest"
+        - name: targetIndex
+          value: "quay.io/fbc/catalog:test"
+        - name: buildTags
+          value: "[]"
+        - name: addArches
+          value: "[]"
+        - name: iibServiceAccountSecret
+          value: "iib-service-account-secret"
+        - name: publishingCredentials
+          value: "publishing-credentials"

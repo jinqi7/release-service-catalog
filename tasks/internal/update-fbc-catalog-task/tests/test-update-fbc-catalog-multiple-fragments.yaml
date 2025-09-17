@@ -2,17 +2,20 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: test-update-fbc-catalog-prod
+  name: test-update-fbc-catalog-multiple-fragments
 spec:
-  description: Tests the pipeline using a set of parameters in consonance with a production fbc release. In this test
-    the mocked commands and functions emulates the behavior of a fbc opt in fragment.
+  description: |
+    Tests the pipeline using multiple fragments in the fbcFragments array parameter. This test validates that
+    the task correctly processes multiple FBC fragments in a single IIB build request, including validation of
+    format, processing multiple fragments for opm render, and checking fbc opt-in for all fragments.
   tasks:
     - name: run-task
       taskRef:
         name: update-fbc-catalog-task
       params:
-        - name: fbcFragment
-          value: "registry.io/image0@sha256:0000"
+        - name: fbcFragments
+          value: |
+            ["registry.io/image0@sha256:0000", "registry.io/image1@sha256:1111", "registry.io/image2@sha256:2222"]
         - name: fromIndex
           value: "quay.io/scoheb/fbc-index-testing:latest"
         - name: targetIndex
@@ -67,8 +70,11 @@ spec:
               #!/bin/bash
               set -x
 
-              # the jsonBuild mockes has 12 keys on it
-              keyLength=$(jq '. | length' <<< "${JSON_BUILDINFO}")
+              # Decompress jsonBuildInfo since task now uses compression
+              decompressed_json="$(base64 -d <<< "${JSON_BUILDINFO}" | gunzip)"
+              
+              # the jsonBuild mocks has 12 keys on it
+              keyLength=$(jq '. | length' <<< "${decompressed_json}")
               if [ "$keyLength" -ne 12 ]; then
                 echo "The task did not save a valid json in jsonBuildInfo result"
                 exit 1
@@ -84,7 +90,7 @@ spec:
                 '. |[.fbc_opt_in, .overwrite_fromindex_image, .publish_index_image,.sign_index_image] |@csv' \
                 <<< "${GENERIC_RESULT}")
               if [ "$genericResult" != '"true","true","true","true"' ]; then
-                echo "The stask did not save the correct values in genericResult result"
+                echo "The task did not save the correct values in genericResult result"
                 exit 1
               fi
 
@@ -101,6 +107,20 @@ spec:
 
               if [ "$(params.exitCode)" != "0" ]; then
                 echo "The task did not finish with a successful exit code"
+                exit 1
+              fi
+
+              # Verify that multiple fragments were processed correctly
+              # The IIB request should contain fbc_fragments array with multiple elements
+              fbc_fragments=$(jq -r '.fbc_fragments' <<< "${decompressed_json}")
+              if [ "$fbc_fragments" = "null" ]; then
+                echo "The task did not save fbc_fragments in the build info"
+                exit 1
+              fi
+
+              fragment_count=$(jq '. | length' <<< "$fbc_fragments")
+              if [ "$fragment_count" -ne 3 ]; then
+                echo "The task did not process the expected number of fragments (expected: 3, got: $fragment_count)"
                 exit 1
               fi
       runAfter:

@@ -217,7 +217,6 @@ spec:
               set -ex
 
               internalRequest=$(kubectl get InternalRequest -o json | jq -r '.items[0]')
-
               # check the pipelineRef
               pipeline="$(jq -r '.spec.pipeline.pipelineRef.params[]|select(.name=="pathInRepo") |.value' \
                 <<< "${internalRequest}")"

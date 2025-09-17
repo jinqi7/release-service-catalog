@@ -25,6 +25,9 @@ spec:
     - name: pipelineRunUid
       type: string
       description: The uid of the current pipelineRun. Used as a label value when creating internal requests
+    - name: ocpVersion
+      type: string
+      description: The OCP version for all components in this release
     - name: resultsDirPath
       type: string
       description: Path to the results directory in the data workspace
@@ -59,6 +62,10 @@ spec:
     - name: taskGitRevision
       type: string
       description: The revision in the taskGitUrl repo to be used
+    - name: maxBatchSize
+      type: string
+      description: Maximum number of FBC fragments to process in a single batch
+      default: "5"
   results:
     - name: buildTimestamp
       description: Build timestamp used in the tag
@@ -151,8 +158,6 @@ spec:
         default_build_timeout_seconds="3600"
         default_request_timeout_seconds="3600"
 
-        build_tags=$(jq '.fbc.buildTags // []' "${DATA_FILE}")
-        add_arches=$(jq '.fbc.addArches // []' "${DATA_FILE}")
         hotfix=$(jq -r '.fbc.hotfix // "false"' "${DATA_FILE}")
         pre_ga=$(jq -r '.fbc.preGA // "false"' "${DATA_FILE}")
         staged_index=$(jq -r '.fbc.stagedIndex // "false"' "${DATA_FILE}")
@@ -175,8 +180,70 @@ spec:
         timestamp_format=$(jq -r '.fbc.timestampFormat // "%s"' "${DATA_FILE}")
         timestamp=$(date "+${timestamp_format}")
 
+        # Tag validation and sanitization function
+        validate_and_sanitize_tag_component() {
+          local component="$1"
+          local component_name="$2"
+          local max_length="$3"
+          
+          # Validate not empty
+          if [ -z "$component" ]; then
+            echo "ERROR: ${component_name} cannot be empty"
+            exit 1
+          fi
+          
+          # Sanitize invalid characters by replacing with hyphens
+          sanitized="${component//[^a-zA-Z0-9._-]/-}"
+          
+          # Collapse consecutive special characters to single hyphen
+          while [[ "$sanitized" =~ [._-][._-] ]]; do
+            sanitized="${sanitized//[._-][._-]/-}"
+          done
+          
+          # Remove leading and trailing special characters
+          sanitized=$(echo "$sanitized" | sed 's/^[-._]*//;s/[-._]*$//')
+          
+          # Check if sanitization resulted in empty string
+          if [ -z "$sanitized" ]; then
+            echo "ERROR: ${component_name} '$component' sanitization resulted in empty string"
+            exit 1
+          fi
+          
+          # Check for reserved names
+          case "$sanitized" in
+            "latest"|"main"|"master"|"HEAD")
+              echo "ERROR: ${component_name} cannot use reserved name: '$sanitized' (from '$component')"
+              exit 1
+              ;;
+          esac
+          
+          # Report sanitization if changes were made
+          if [ "$component" != "$sanitized" ]; then
+            echo "INFO: ${component_name} sanitized from '$component' to '$sanitized'"
+          fi
+          
+          # Check length and truncate if necessary
+          if [ ${#sanitized} -gt "$max_length" ]; then
+            truncated=$(echo "$sanitized" | cut -c1-"$max_length")
+            # Ensure truncated version doesn't end with special char
+            truncated="${truncated%[._-]}"
+            while [[ "$truncated" =~ [._-]$ ]]; do
+              truncated="${truncated%[._-]}"
+            done
+            echo "WARNING: ${component_name} truncated from '$sanitized' to '$truncated' (max ${max_length} chars)"
+            echo "$truncated"
+          else
+            echo "$sanitized"
+          fi
+        }
+
         # default target_index
         target_index=$(params.targetIndex)
+
+        # Calculate tag length limits - will be set per release type
+        max_tag_length=128
+        max_product_name_length=0
+        max_product_version_length=0
 
         if [ "${hotfix}" = "true" ] && [ "${pre_ga}" = "true" ]; then
           echo "fbc.preGA and fbc.hotfix are mutually exclusive. Please set just one in the ReleasePlanAdmission"
@@ -198,7 +265,36 @@ spec:
                  "spec.data field"
             exit 1
           fi
-          target_index="${target_index}-${product_name}-${product_version}-${timestamp}"
+          
+          # Sanitize product version first (assume shorter, max 20 chars)
+          max_product_version_length=20
+          sanitized_product_version=$(validate_and_sanitize_tag_component "$product_version" \
+                                              "fbc.productVersion" "$max_product_version_length")
+          
+          # Calculate remaining space for product name after all other components
+          # Format: ${target_index}-${product_name}-${sanitized_product_version}-${timestamp}
+          base_target_length=${#target_index}
+          version_length=${#sanitized_product_version}
+          timestamp_length=${#timestamp}
+          separator_chars=3  # Three hyphens
+          reserved_space=$((base_target_length + version_length + timestamp_length + separator_chars))
+          available_space=$((max_tag_length - reserved_space))
+
+          # Check if we have minimum space for product name
+          min_product_name_length=8
+          if [ $available_space -lt $min_product_name_length ]; then
+            echo "ERROR: Not enough space for product name in pre-GA tag. " \
+                 "Available: ${available_space}, needed: ${min_product_name_length}"
+            echo "Base components use ${reserved_space} of ${max_tag_length} characters"
+            exit 1
+          fi
+
+          # Use all remaining space for product name
+          max_product_name_length=$available_space
+          sanitized_product_name=$(validate_and_sanitize_tag_component "$product_name" \
+                                           "fbc.productName" "$max_product_name_length")
+          
+          target_index="${target_index}-${sanitized_product_name}-${sanitized_product_version}-${timestamp}"
         fi
 
         # to keep compatibility with current single component mode
@@ -210,48 +306,90 @@ spec:
 
         pipelinerun_label="internal-services.appstudio.openshift.io/pipelinerun-uid"
 
+        # Create batches with size limits
         LENGTH=$(jq -r '.components | length' "${SNAPSHOT_PATH}")
-        for((i=0; i<LENGTH; i++)); do
-          ocp_version=$(jq -cr --argjson i "$i" '.components[$i].ocpVersion' "${SNAPSHOT_PATH}")
-          fbc_fragment=$(jq -cr --argjson i "$i" '.components[$i].containerImage' "${SNAPSHOT_PATH}")
-          from_index=$(jq -cr --argjson i "$i" '.components[$i].updatedFromIndex' "${SNAPSHOT_PATH}")
+        MAX_BATCH_SIZE="$(params.maxBatchSize)"
+        echo "Processing $LENGTH components with maximum batch size of $MAX_BATCH_SIZE..."
 
-          # the target_index is modified when the pipelinerun is a for `hotfix` or a `pre-GA` release
-          target_index=$(jq -cr --argjson i "$i" '.components[$i].updatedTargetIndex' "${SNAPSHOT_PATH}")
-          if [ "${hotfix}" = "true" ]; then
-            issue_id=$(jq -r '.fbc.issueId // empty' "${DATA_FILE}")
-            if [ -z "${issue_id}" ]; then
-              echo "Hotfix releases requires the issue id set in the 'fbc.issueId' key of the ReleasePlanAdmission " \
-                   "spec.data field"
-              exit 1
-            fi
-            target_index="${target_index}-${issue_id}-${timestamp}"
-          elif [ "${pre_ga}" = "true" ]; then
-            if [ -z "${product_name}" ] || [ -z "${product_version}" ]; then
-              echo "Pre-GA releases require 'fbc.productName' and 'fbc.productVersion' set in the " \
-                   "ReleasePlanAdmission spec.data field"
-              exit 1
-            fi
-            target_index="${target_index}-${product_name}-${product_version}-${timestamp}"
+        # Read global buildTags and addArches from data file
+        build_tags=$(jq '.fbc.buildTags // []' "${DATA_FILE}")
+        add_arches=$(jq '.fbc.addArches // []' "${DATA_FILE}")
+
+        # Apply target_index resolution logic for hotfix/pre-GA
+        resolved_target_index="$(params.targetIndex)"  # Use original targetIndex parameter
+        if [ "${hotfix}" = "true" ]; then
+          issue_id=$(jq -r '.fbc.issueId // empty' "${DATA_FILE}")
+          if [ -z "${issue_id}" ]; then
+            echo "Hotfix releases requires the issue id set in the 'fbc.issueId' key of the ReleasePlanAdmission " \
+                 "spec.data field"
+            exit 1
+          fi
+          resolved_target_index="${resolved_target_index}-${issue_id}-${timestamp}"
+        elif [ "${pre_ga}" = "true" ]; then
+          if [ -z "${product_name}" ] || [ -z "${product_version}" ]; then
+            echo "Pre-GA releases require 'fbc.productName' and 'fbc.productVersion' set in the " \
+                 "ReleasePlanAdmission spec.data field"
+            exit 1
+          fi
+          # Reuse already sanitized values from above
+          resolved_target_index="${resolved_target_index}-${sanitized_product_name}-${sanitized_product_version}-${timestamp}"
+        fi
+
+        # Calculate number of batches needed
+        NUM_BATCHES=$(( (LENGTH + MAX_BATCH_SIZE - 1) / MAX_BATCH_SIZE ))
+        echo "Creating $NUM_BATCHES batch(es) for $LENGTH components"
+
+        # Common values for all batches
+        batch_from_index="$(params.fromIndex)"
+        batch_target_index="$resolved_target_index"
+        batch_ocp_version="$(params.ocpVersion)"
+        
+        # Calculate timeout for batches
+        finally_task_timeout=300
+        pipeline_timeout=$(date -u "+%Hh%Mm%Ss" -d @$(( request_timeout_seconds + finally_task_timeout )))
+        task_timeout=$(date -u "+%Hh%Mm%Ss" -d @$(( request_timeout_seconds )))
+
+        # Initialize the current fromIndex for chaining batches
+        current_from_index="$batch_from_index"
+        
+        # Process each batch sequentially, chaining index images
+        for((batch_num=0; batch_num<NUM_BATCHES; batch_num++)); do
+          start_idx=$((batch_num * MAX_BATCH_SIZE))
+          end_idx=$(((batch_num + 1) * MAX_BATCH_SIZE))
+          if [ $end_idx -gt "$LENGTH" ]; then
+            end_idx=$LENGTH
+          fi
+          batch_size=$((end_idx - start_idx))
+
+          echo "Processing batch $((batch_num + 1))/$NUM_BATCHES (components $((start_idx + 1))-$end_idx)"
+
+          # Collect fragments for this batch
+          batch_fragments='[]'
+          for((i=start_idx; i<end_idx; i++)); do
+            fbc_fragment=$(jq -cr --argjson i "$i" '.components[$i].containerImage' "${SNAPSHOT_PATH}")
+            batch_fragments=$(jq --arg fragment "$fbc_fragment" '. += [$fragment]' <<< "$batch_fragments")
+          done
+
+          echo "Batch $((batch_num + 1)) details:"
+          echo "  - fromIndex: $current_from_index"
+          echo "  - targetIndex: $batch_target_index"
+          echo "  - ocpVersion: $batch_ocp_version"
+          echo "  - fragments: $batch_size items"
+          if [ $batch_num -gt 0 ]; then
+            echo "  - Chaining from previous batch output"
           fi
 
-          finally_task_timeout=300
-          pipeline_timeout=$(date -u "+%Hh%Mm%Ss" -d @$(("${request_timeout_seconds}"+"${finally_task_timeout}")))
-          task_timeout=$(date -u "+%Hh%Mm%Ss" -d @$(("${request_timeout_seconds}")))
-
-          echo "Processing fragment: ${fbc_fragment}:"
-          # The internal-request script will create the InternalRequest and wait until it finishes to get its status
-          # If it fails (Failed, Rejected or Timed out) the script will exit and display the reason.
-          echo "Creating InternalRequest to add FBC contribution to index image:"
+          # Create InternalRequest for this batch
+          echo "Creating InternalRequest for batch $((batch_num + 1)) with $batch_size fragments..."
           internal-request --pipeline "update-fbc-catalog" \
-              -p fromIndex="${from_index}" \
-              -p targetIndex="${target_index}" \
-              -p fbcFragment="${fbc_fragment}" \
+              -p fromIndex="${current_from_index}" \
+              -p targetIndex="${batch_target_index}" \
+              -p fbcFragments="$(printf '%s' "${batch_fragments}" | jq -c .)" \
               -p iibServiceAccountSecret="${iib_service_account_secret}" \
               -p publishingCredentials="${publishing_credentials}" \
               -p buildTimeoutSeconds="${build_timeout_seconds}" \
-              -p buildTags="${build_tags}" \
-              -p addArches="${add_arches}" \
+              -p buildTags="$(jq -c . <<< "${build_tags}")" \
+              -p addArches="$(jq -c . <<< "${add_arches}")" \
               -p hotfix="${hotfix}" \
               -p stagedIndex="${staged_index}" \
               -p taskGitUrl="$(params.taskGitUrl)" \
@@ -260,106 +398,109 @@ spec:
               -l ${pipelinerun_label}="$(params.pipelineRunUid)" \
               --pipeline-timeout "${pipeline_timeout}" \
               --task-timeout "${task_timeout}" \
-              -t "${request_timeout_seconds}" |tee "$(params.dataDir)"/ir-"$(context.taskRun.uid)"-output.log
+              -t "${request_timeout_seconds}" \
+              |tee "$(params.dataDir)"/ir-"$(context.taskRun.uid)"-batch-$((batch_num + 1))-output.log
 
+          # Store batch request info in global variables (final batch values will be used later)
           internalRequest=$(awk -F"'" '/created/ { print $2 }' \
-            "$(params.dataDir)"/ir-"$(context.taskRun.uid)"-output.log)
-          echo "done (${internalRequest})"
+            "$(params.dataDir)"/ir-"$(context.taskRun.uid)"-batch-$((batch_num + 1))-output.log)
+          echo "Batch $((batch_num + 1)) request created: ${internalRequest}"
 
-          # Fetching InternalRequest status and populating results
+          # Fetch batch results (global variables updated each iteration)
           results=$(kubectl get internalrequest "${internalRequest}" -o jsonpath='{.status.results}')
-          echo "${results}" > "$(params.dataDir)/ir-$(context.taskRun.uid)-result.json"
+          echo "${results}" > "$(params.dataDir)/ir-$(context.taskRun.uid)-batch-$((batch_num + 1))-result.json"
 
-          completion_time_raw="$(jq -r '.jsonBuildInfo | fromjson | .updated' <<< "${results}")"
+          # Decompress jsonBuildInfo for processing (global variable updated each iteration)
+          decompressed_json_build_info="$(jq -r '.jsonBuildInfo' <<< "${results}" | base64 -d | gunzip)"
+          completion_time_raw="$(jq -r '.updated' <<< "${decompressed_json_build_info}")"
           completion_time=$(date +"${timestamp_format}" -d "${completion_time_raw}")
+          
+          # Process results for each fragment in this batch
+          fragment_count=$(jq -r 'length' <<< "$batch_fragments")
+          
+          for((f=0; f<fragment_count; f++)); do
+            fragment=$(jq -r --argjson f "$f" '.[$f]' <<< "$batch_fragments")
+            
+            echo "Processing result for fragment: $fragment (batch $((batch_num + 1)))"
+            
+            # Build individual component result
+            build_results=$(jq \
+              --arg fragment "$fragment" \
+              --arg target_index "$batch_target_index" \
+              --arg ocp_version "$batch_ocp_version" \
+              --arg completion_time "$completion_time" \
+              --argjson decompressed_json "${decompressed_json_build_info}" \
+            '{
+              "fbc_fragment": $fragment,
+              "target_index": $target_index,
+              "ocp_version": $ocp_version,
+              "image_digests": (.indexImageDigests | split(" ") | del(.[] | select(. == ""))),
+              "index_image": $decompressed_json.index_image,
+              "index_image_resolved": $decompressed_json.index_image_resolved,
+              "completion_time": $completion_time,
+              "iibLog": .iibLog
+            }' <<< "${results}")
 
-          # construct the results json
-          build_results=$(jq \
-            --arg fragment "$fbc_fragment" \
-            --arg target_index "$target_index" \
-            --arg ocp_version "$ocp_version" \
-            --arg completion_time "$completion_time" \
-          '{
-            "fbc_fragment": $fragment,
-            "target_index": $target_index,
-            "ocp_version": $ocp_version,
-            "image_digests": (.indexImageDigests | split(" ") | del(.[] | select(. == ""))),
-            "index_image": (.jsonBuildInfo | fromjson | .index_image),
-            "index_image_resolved": (.jsonBuildInfo | fromjson | .index_image_resolved),
-            "completion_time": $completion_time,
-            "iibLog": .iibLog
-          }' <<< "${results}")
-
-          # updates the file in place with the new results
-          export build_results
-          yq -i '.components += [ env(build_results) ]' "$RESULTS_FILE"
-
-          mustSignIndexImage=$(jq -r '.genericResult | fromjson' <<< "${results}" \
-            | jq -r '.sign_index_image' |tr -d "\n")
-          mustPublishIndexImage=$(jq -r '.genericResult | fromjson' <<< "${results}" \
-            | jq -r '.publish_index_image' |tr -d "\n")
-          fbc_opt_in=$(jq -r '.genericResult | fromjson' <<< "${results}" | jq -cr '.fbc_opt_in')
-
-          # Store the results in Tekton's results files
-          echo -en "${mustPublishIndexImage}" | tee "$(results.mustPublishIndexImage.path)"
-          echo -en "${mustSignIndexImage}" | tee "$(results.mustSignIndexImage.path)"
-          echo -en "${fbc_opt_in}" | tee "$(results.isFbcOptIn.path)"
-
-          # this results below should be depracated
-          conditions=$(kubectl get internalrequest "${internalRequest}" \
-            -o jsonpath='{.status.conditions[?(@.type=="Succeeded")]}')
-          jq '.reason // "Unset"'  <<< "${conditions}" | tee "$(results.requestReason.path)"
-          jq '.message // "Unset"' <<< "${conditions}" | tee "$(results.requestMessage.path)"
-          jq -r '.indexImageDigests' <<< "${results}" |  tee "$(results.indexImageDigests.path)"
-
-          # the following ones are used to help debugging in case of failure
-          jq -r '.iibLog' <<< "${results}"
-          RC="$(jq -r '.exitCode' <<< "${results}")"
-
-          # Summarize what happened for the human user. Although the continuation of the pipeline will depend on all
-          # components having the same flag values, we should display them to help the user to understand which of the
-          # component might be misconfigured.
-          if [ "$mustPublishIndexImage" = "true" ]; then
-            echo "Index image will be published."
-          elif [ "$fbc_opt_in" = "false" ]; then
-            echo "Index image will not be published because fbc_opt_in is set to false in Pyxis."
-            echo "If this is the first time you are releasing, make sure you request fbc_opt_in in Pyxis."
-          elif [ "${staged_index}" = "true" ]; then
-            echo "Index image will not be published because this is a staging release."
-          else
-            echo "Index image will not be published for an unspecified reason."
-          fi
-
-          if [ "$RC" -ne 0 ]; then
-            echo "The fragment failed to be processed, check which fragment and its log link above " \
-                 "to understand the reason"
-            exit "$RC"
+            # Add to results file
+            export build_results
+            yq -i '.components += [ env(build_results) ]' "$RESULTS_FILE"
+          done
+          
+          # Update fromIndex for next batch (if there is one) to chain index images
+          if [ $batch_num -lt $((NUM_BATCHES - 1)) ]; then
+            # Extract the output index image from this batch to use as input for next batch
+            next_from_index=$(jq -r '.index_image' <<< "$decompressed_json_build_info")
+            if [ -n "$next_from_index" ] && [ "$next_from_index" != "null" ]; then
+              current_from_index="$next_from_index"
+              echo "Next batch will use fromIndex: $current_from_index"
+            else
+              echo "Warning: Could not extract index_image from batch $((batch_num + 1)) results, " \
+                   "using original fromIndex"
+            fi
           fi
         done
 
-        # the flags of all components should match. A single unmatching flag should stop signing and publishing.
-        fbcPipelineFlags=$(jq -r '.genericResult | fromjson' <<< "${results}" |jq --slurp  '. | unique')
-        if [ "$(jq -r 'length' <<< "${fbcPipelineFlags}")" == 1 ]; then
-          jq -r '.[].sign_index_image' <<< "${fbcPipelineFlags}" | tr -d "\n" \
-            | tee "$(results.mustSignIndexImage.path)"
-          jq -r '.[].publish_index_image' <<< "${fbcPipelineFlags}" | tr -d "\n" \
-            | tee "$(results.mustPublishIndexImage.path)"
-          jq -r '.[].fbc_opt_in' <<< "${fbcPipelineFlags}" | tr -d "\n" | tee "$(results.isFbcOptIn.path)"
+        # Extract flags from batch results (same for all fragments in batch)
+        mustSignIndexImage=$(jq -r '.genericResult | fromjson' <<< "${results}" \
+          | jq -r '.sign_index_image' |tr -d "\n")
+        mustPublishIndexImage=$(jq -r '.genericResult | fromjson' <<< "${results}" \
+          | jq -r '.publish_index_image' |tr -d "\n")
+        fbc_opt_in=$(jq -r '.genericResult | fromjson' <<< "${results}" | jq -cr '.fbc_opt_in')
+
+        # Store the results in Tekton's results files
+        echo -en "${mustPublishIndexImage}" | tee "$(results.mustPublishIndexImage.path)"
+        echo -en "${mustSignIndexImage}" | tee "$(results.mustSignIndexImage.path)"
+        echo -en "${fbc_opt_in}" | tee "$(results.isFbcOptIn.path)"
+
+        # Store deprecated results for compatibility
+        conditions=$(kubectl get internalrequest "${internalRequest}" \
+          -o jsonpath='{.status.conditions[?(@.type=="Succeeded")]}')
+        jq '.reason // "Unset"'  <<< "${conditions}" | tee "$(results.requestReason.path)"
+        jq '.message // "Unset"' <<< "${conditions}" | tee "$(results.requestMessage.path)"
+        jq -r '.indexImageDigests' <<< "${results}" |  tee "$(results.indexImageDigests.path)"
+
+        # Output batch logs for debugging
+        jq -r '.iibLog' <<< "${results}"
+        RC="$(jq -r '.exitCode' <<< "${results}")"
+
+        # Summarize batch results
+        if [ "$mustPublishIndexImage" = "true" ]; then
+          echo "Index image will be published."
+        elif [ "$fbc_opt_in" = "false" ]; then
+          echo "Index image will not be published because fbc_opt_in is set to false in Pyxis."
+          echo "If this is the first time you are releasing, make sure you request fbc_opt_in in Pyxis."
+        elif [ "${staged_index}" = "true" ]; then
+          echo "Index image will not be published because this is a staging release."
         else
-          echo -en "false" | tee "$(results.mustSignIndexImage.path)"
-          echo -en "false" | tee "$(results.mustPublishIndexImage.path)"
-          echo -en "false" | tee "$(results.isFbcOptIn.path)"
+          echo "Index image will not be published for an unspecified reason."
         fi
 
-        # if there are multiple components but they are for the same ocp version, only a single index_image needs
-        # to be signed/published.
-        VERSIONS_COUNT="$(jq -r '[ .components[].ocp_version ] | unique | length' "$RESULTS_FILE")"
-        if [[ "$LENGTH" -gt 1 && "$VERSIONS_COUNT" == 1 ]]; then
-          # keep only the most up to date build index_image
-          RESULTS_TEMP_FILE="/tmp/results-temp.json"
-          jq -r  '.components = [ .components | sort_by(.updated) | last ]' "$RESULTS_FILE" > "$RESULTS_TEMP_FILE"
-          mv "$RESULTS_TEMP_FILE" "$RESULTS_FILE"
+        if [ "$RC" -ne 0 ]; then
+          echo "Batch processing failed, check the batch logs above to understand the reason"
+          exit "$RC"
         fi
+        
+        echo "Batch processing completed successfully with $LENGTH components"
         echo "Results file:"
         cat "$RESULTS_FILE"
     - name: create-trusted-artifact

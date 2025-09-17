@@ -61,7 +61,7 @@ spec:
                 "components": [
                   {
                     "name": "comp",
-                    "containerImage": "quay.io/fbc/multi-arch@sha256:index"
+                    "containerImage": "quay.io/hacbs-release-tests/test-ocp-version/test-fbc-component@sha256:f6e744662e342c1321deddb92469b55197002717a15f8c0b1bb2d9440aac2297"
                   }
                 ]
               }
@@ -111,6 +111,7 @@ spec:
       taskSpec:
         params:
           - name: stored-version
+            type: string
           - name: sourceDataArtifact
             type: string
           - name: dataDir

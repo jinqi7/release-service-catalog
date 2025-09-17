@@ -210,7 +210,8 @@ spec:
         fi
 
         # Try to extract the first contentType if it exists
-        content_type=$(jq -r '.mapping.components[]?.contentGateway?.contentType // empty' "$DATA_FILE" | head -n1)
+        content_type=$(jq -r '.mapping.components[]? |
+          (.contentGateway?.contentType // .contentType) // empty' "$DATA_FILE" | head -n1)
 
         # Extract github field from data.json
         github_field=$(jq -r '.github // empty' "$DATA_FILE")
@@ -237,17 +238,12 @@ spec:
         do
             component=$(jq -c --argjson i "$i" '.components[$i]' "${SNAPSHOT_FILE}")
             name=$(jq -r '.name' <<< "$component")
-            deliveryRepo=$(jq -er '."rh-registry-repo"' <<< "$component")
-            tags=$(jq -c '.tags' <<< "$component")
             image=$(jq -r '.containerImage' <<< "$component")
             if ! [[ "$image" =~ ^[^:]+@sha256:[0-9a-f]+$ ]] ; then
                 echo "Failed to extract sha256 tag from ${image}. Exiting with failure"
                 exit 1
             fi
-            sha=$(echo "${image}" | cut -d ':' -f 2)
-            # containerImage should be of the form registry.redhat.io/foo/bar@sha256:abcde
-            # This value will be used as the basis for the example values that follow
-            containerImage="${deliveryRepo}@sha256:${sha}"
+        
             # Construct CVE json
             CVEsJson='{"cves":{"fixed":{}}}'
             CVES=$(jq -c '[.releaseNotes.cves[]? | select(.component=="'"$name"'")]' "${DATA_FILE}")
@@ -260,46 +256,57 @@ spec:
                     '{($id): {"packages": $packages}}')
                 CVEsJson=$(jq --argjson cve "$cveJson" '.cves.fixed += $cve' <<< "$CVEsJson")
             done
-            # Add one entry per arch (amd64 for example)
-            get-image-architectures "${image}" | while IFS= read -r arch_json;
-            do
-                arch=$(jq -r .platform.architecture <<< "${arch_json}")
-                digest=$(jq -r .digest <<< "${arch_json}")
-                containerImage="${deliveryRepo}@${digest}"
-                # purl should be pkg:oci/bar@sha256%3Aabcde?arch=amd64&repository_url=registry.redhat.io/foo
-                purl="pkg:oci/${deliveryRepo##*/}@${digest/:/%3A}?arch=${arch}&repository_url=${deliveryRepo%/*}"
+        
+            arch_digests=$(get-image-architectures "${image}")
+        
+            # Iterate over repositories (new schema only)
+            NUM_REPOS=$(jq '.repositories | length' <<< "$component")
+            for ((r = 0; r < NUM_REPOS; r++)); do
+                repo=$(jq -c --argjson r "$r" '.repositories[$r]' <<< "$component")
+                deliveryRepo=$(jq -er '."rh-registry-repo"' <<< "$repo")
+                tags=$(jq -c '.tags' <<< "$repo")
 
-                uniqueTag=""
-                NUM_TAGS=$(jq length <<< "$tags")
-                for ((j = 0; j < NUM_TAGS; j++)) ; do
-                    tag=$(jq -r --argjson j "$j" '.[$j]' <<< "$tags")
-                    if [[ $tag =~ $UNIQUE_TAG_REGEX ]] && [[ ${#tag} > ${#uniqueTag} ]] ; then
-                        uniqueTag="${tag}"
+                # Add one entry per arch (amd64 for example)
+                while IFS= read -r arch_json;
+                do
+                    arch=$(jq -r .platform.architecture <<< "${arch_json}")
+                    digest=$(jq -r .digest <<< "${arch_json}")
+                    containerImage="${deliveryRepo}@${digest}"
+                    # purl should be pkg:oci/bar@sha256%3Aabcde?arch=amd64&repository_url=registry.redhat.io/foo
+                    purl="pkg:oci/${deliveryRepo##*/}@${digest/:/%3A}?arch=${arch}&repository_url=${deliveryRepo%/*}"
+    
+                    uniqueTag=""
+                    NUM_TAGS=$(jq length <<< "$tags")
+                    for ((j = 0; j < NUM_TAGS; j++)) ; do
+                        tag=$(jq -r --argjson j "$j" '.[$j]' <<< "$tags")
+                        if [[ $tag =~ $UNIQUE_TAG_REGEX ]] && [[ ${#tag} > ${#uniqueTag} ]] ; then
+                            uniqueTag="${tag}"
+                        fi
+                    done
+    
+                    # if a unique tag is found, then purl will become:
+                    # pkg:oci/bar@sha256%3Aabcde?arch=amd64&repository_url=registry.redhat.io/foo&tag=0.1-12345678
+                    if [[ -n $uniqueTag ]] ; then
+                        purl="${purl}&tag=${uniqueTag}"
                     fi
-                done
-
-                # if a unique tag is found, then purl will become:
-                # pkg:oci/bar@sha256%3Aabcde?arch=amd64&repository_url=registry.redhat.io/foo&tag=0.1-12345678
-                if [[ -n $uniqueTag ]] ; then
-                    purl="${purl}&tag=${uniqueTag}"
-                fi
-
-                jsonString=$(jq -cn \
-                    --arg component "$name" \
-                    --arg arch "$arch" \
-                    --arg containerImage "$containerImage" \
-                    --arg purl "$purl" \
-                    --arg repository "$deliveryRepo" \
-                    --argjson tags "$tags" \
-                    '{"architecture": $arch, "containerImage": $containerImage, "purl": $purl,
-                    "repository": $repository, "tags": $tags, "component": $component}')
-                if [ "$(jq '.cves.fixed | length' <<< "$CVEsJson")" -gt 0 ]; then
-                    jsonString=$(jq --argjson cves "$CVEsJson" '. += $cves' <<< "$jsonString")
-                fi
-
-                # Inject JSON into data.json
-                jq --argjson image "$jsonString" '.releaseNotes.content.images += [$image]' "${DATA_FILE}" > \
-                    /tmp/data.tmp && mv /tmp/data.tmp "${DATA_FILE}"
+    
+                    jsonString=$(jq -cn \
+                        --arg component "$name" \
+                        --arg arch "$arch" \
+                        --arg containerImage "$containerImage" \
+                        --arg purl "$purl" \
+                        --arg repository "$deliveryRepo" \
+                        --argjson tags "$tags" \
+                        '{"architecture": $arch, "containerImage": $containerImage, "purl": $purl,
+                        "repository": $repository, "tags": $tags, "component": $component}')
+                    if [ "$(jq '.cves.fixed | length' <<< "$CVEsJson")" -gt 0 ]; then
+                        jsonString=$(jq --argjson cves "$CVEsJson" '. += $cves' <<< "$jsonString")
+                    fi
+    
+                    # Inject JSON into data.json
+                    jq --argjson image "$jsonString" '.releaseNotes.content.images += [$image]' "${DATA_FILE}" > \
+                        /tmp/data.tmp && mv /tmp/data.tmp "${DATA_FILE}"
+                done <<< "$arch_digests"
             done
         done
     - name: populate-release-notes-artifacts
@@ -321,7 +328,8 @@ spec:
         fi
 
         # Try to extract the first contentType if it exists
-        content_type=$(jq -r '.mapping.components[]?.contentGateway?.contentType // empty' "$DATA_FILE" | head -n1)
+        content_type=$(jq -r '.mapping.components[]? |
+          (.contentGateway?.contentType // .contentType) // empty' "$DATA_FILE" | head -n1)
 
         if [ "$content_type" != "binary" ] && [ "$content_type" != "disk-image" ]; then
             echo "Not binary or disk-image content. Skipping artifact-specific logic."
@@ -352,6 +360,15 @@ spec:
               '.releaseNotes.content.artifacts += [$content]' \
               "${DATA_FILE}" > /tmp/data.tmp && \
               mv /tmp/data.tmp "${DATA_FILE}"
+        }
+
+        # Check if this is a marketplace release
+        is_marketplace_release() {
+          if [[ -n "$(jq -r '.mapping.cloudMarketplacesSecret // empty' "$DATA_FILE")" ]]; then
+            return 0
+          else
+            return 1
+          fi
         }
 
         NUM_COMPONENTS=$(jq '.components | length' "${SNAPSHOT_FILE}")
@@ -420,9 +437,17 @@ spec:
                     # Determine OS based on file extension
                     os="linux"  # Default for disk images
 
-                    # Create PURL placeholder for disk-image
-                    # Complete PURL with real CDN URLs will be built by create-advisory update-purl step
-                    purl="placeholder"
+                    # Create PURL for disk-image
+                    if is_marketplace_release; then
+                        # For marketplace releases, generate a PURL without checksum or download_url
+                        # since these images go to cloud marketplaces, not CDN
+                        version=$(jq -r --arg name "$name" \
+                          '.mapping.components[] | select(.name == $name) | .staged.version // "unknown"' "$DATA_FILE")
+                        purl="pkg:generic/$name@$version"
+                    else
+                        # For CDN releases, use placeholder that will be updated by create-advisory
+                        purl="placeholder"
+                    fi
 
                     append_artifact_entry "$name" "$arch" "$os" "$purl"
                 done
