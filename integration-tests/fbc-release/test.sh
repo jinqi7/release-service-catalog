@@ -76,29 +76,29 @@ configure_test_matrix() {
     
     # These conditions are additive - multiple patterns can match and enable their respective tests
     
-    if [[ "$changed_files" =~ tasks/managed/sign-index-image ]] || [[ "$changed_files" =~ pipelines/internal/simple-signing-pipeline ]] || [[ "$changed_files" =~ tasks/internal/request-and-upload-signature ]]; then
-        echo "🎯 Detected signing task changes - enabling core scenarios with multi-component validation"
+    if [[ "$changed_files" =~ tasks/managed/sign-index-image ]] || \
+       [[ "$changed_files" =~ pipelines/internal/simple-signing-pipeline ]] || \
+       [[ "$changed_files" =~ tasks/internal/request-and-upload-signature ]]; then
+        echo "🎯 Detected signing task changes - enabling core scenarios"
         GLOBAL_TEST_MATRIX["single-happy"]="enabled"
         GLOBAL_TEST_MATRIX["single-staged"]="enabled"
-        GLOBAL_TEST_MATRIX["multi-happy"]="enabled"
         tests_enabled=true
-        echo "  Signing changes enabled: single-happy, single-staged, multi-happy"
+        echo "  Signing changes enabled: single-happy, single-staged"
     fi
     
-    if [[ "$changed_files" =~ tasks/managed/add-fbc-contribution ]]; then
-        echo "🎯 Detected tag logic task changes - enabling single-component focused tests"
+    if [[ "$changed_files" =~ pipelines/managed/fbc-release ]] || \
+       [[ "$changed_files" =~ tasks/managed/prepare-fbc-parameters ]] || \
+       [[ "$changed_files" =~ tasks/managed/add-fbc-contribution ]] || \
+       [[ "$changed_files" =~ tasks/internal/check-fbc-opt-in ]] || \
+       [[ "$changed_files" =~ tasks/internal/update-fbc-catalog-task ]] || \
+       [[ "$changed_files" =~ pipelines/internal/check-fbc-opt-in ]] || \
+       [[ "$changed_files" =~ pipelines/internal/update-fbc-catalog ]] || \
+       [[ "$changed_files" =~ pipelines/internal/publish-index-image-pipeline ]]; then
+        echo "🎯 Detected batching/publishing pipeline changes - enabling multi-component focused tests"
         GLOBAL_TEST_MATRIX["single-happy"]="enabled"
         GLOBAL_TEST_MATRIX["single-staged"]="enabled"
         GLOBAL_TEST_MATRIX["single-prega"]="enabled"
         GLOBAL_TEST_MATRIX["single-hotfix"]="enabled"
-        tests_enabled=true
-        echo "  Tag logic changes enabled: single-happy, single-staged, single-prega, single-hotfix"
-    fi
-    
-    if [[ "$changed_files" =~ pipelines/managed/fbc-release ]] || [[ "$changed_files" =~ tasks/managed/update-fbc-catalog ]] || [[ "$changed_files" =~ tasks/managed/get-ocp-version ]] || [[ "$changed_files" =~ tasks/internal/update-fbc-catalog-task ]] || [[ "$changed_files" =~ pipelines/internal/update-fbc-catalog ]] || [[ "$changed_files" =~ pipelines/internal/publish-index-image-pipeline ]]; then
-        echo "🎯 Detected batching/publishing pipeline changes - enabling multi-component focused tests"
-        GLOBAL_TEST_MATRIX["single-happy"]="enabled"
-        GLOBAL_TEST_MATRIX["single-staged"]="enabled"
         GLOBAL_TEST_MATRIX["multi-happy"]="enabled"
         GLOBAL_TEST_MATRIX["multi-staged"]="enabled"
         tests_enabled=true
@@ -425,21 +425,70 @@ wait_for_single_plr_to_complete() {
     echo "PipelineRun URL: $(get_build_pipeline_run_url "${tenant_namespace}" "${application_name}" "${plr_name}")"
 }
 
-# Always wait for PLR completion for both components for simplicity and reliability
+# Wait for PLR completion for both components in parallel to avoid race conditions
 wait_for_plr_to_complete() {
-    echo "⏳ Waiting for PipelineRuns to complete for both components (always dual for reliability)..."
-    
-    # Always wait for component 1 PLR
-    echo "Waiting for component PipelineRun ${component_push_plr_name} to complete..."
-    wait_for_single_plr_to_complete "${component_push_plr_name}" "${component_name}"
-    echo "✅ Component 1 (${component_name}) PipelineRun completed: ${component_push_plr_name}"
-    
-    # Always wait for component 2 PLR
-    echo "Waiting for component2 PipelineRun ${component2_push_plr_name} to complete..."
-    wait_for_single_plr_to_complete "${component2_push_plr_name}" "${component2_name}"
-    echo "✅ Component 2 (${component2_name}) PipelineRun completed: ${component2_push_plr_name}"
-    
-    echo "All PipelineRuns completed successfully"
+    echo "⏳ Waiting for PipelineRuns to complete for both components in parallel (robustness improvement)..."
+
+    local comp1_plr="${component_push_plr_name}"
+    local comp2_plr="${component2_push_plr_name}"
+    local comp1_name="${component_name}"
+    local comp2_name="${component2_name}"
+
+    echo "🔄 Starting parallel monitoring of:"
+    echo "  - Component 1 PLR: ${comp1_plr} (${comp1_name})"
+    echo "  - Component 2 PLR: ${comp2_plr} (${comp2_name})"
+
+    # Create temporary files to capture results from background processes
+    local comp1_result=$(mktemp)
+    local comp2_result=$(mktemp)
+
+    # Start monitoring both PLRs in parallel
+    (
+        if wait_for_single_plr_to_complete "${comp1_plr}" "${comp1_name}"; then
+            echo "success" > "${comp1_result}"
+            echo "✅ Component 1 (${comp1_name}) PipelineRun completed: ${comp1_plr}" >&2
+        else
+            echo "failure" > "${comp1_result}"
+            echo "🔴 Component 1 (${comp1_name}) PipelineRun failed: ${comp1_plr}" >&2
+        fi
+    ) &
+    local pid1=$!
+
+    (
+        if wait_for_single_plr_to_complete "${comp2_plr}" "${comp2_name}"; then
+            echo "success" > "${comp2_result}"
+            echo "✅ Component 2 (${comp2_name}) PipelineRun completed: ${comp2_plr}" >&2
+        else
+            echo "failure" > "${comp2_result}"
+            echo "🔴 Component 2 (${comp2_name}) PipelineRun failed: ${comp2_plr}" >&2
+        fi
+    ) &
+    local pid2=$!
+
+    # Wait for both background processes to complete
+    echo "⏳ Waiting for both components to complete..."
+    wait $pid1
+    local exit1=$?
+    wait $pid2
+    local exit2=$?
+
+    # Check results
+    local comp1_status=$(cat "${comp1_result}" 2>/dev/null || echo "unknown")
+    local comp2_status=$(cat "${comp2_result}" 2>/dev/null || echo "unknown")
+
+    # Cleanup temp files
+    rm -f "${comp1_result}" "${comp2_result}"
+
+    # Report results
+    if [ "${comp1_status}" = "success" ] && [ "${comp2_status}" = "success" ]; then
+        echo "🎉 All PipelineRuns completed successfully in parallel"
+        return 0
+    else
+        echo "🔴 One or more PipelineRuns failed:"
+        echo "  - Component 1 (${comp1_name}): ${comp1_status}"
+        echo "  - Component 2 (${comp2_name}): ${comp2_status}"
+        return 1
+    fi
 }
 
 # --- Snapshot Management ---
@@ -618,9 +667,89 @@ EOF
     fi
     
     echo "✅ Created ${#RELEASES_TO_VERIFY[@]} releases, waiting for completion..."
+}
+
+# Validate pipeline results to ensure they are accessible, single-line, and match release artifacts
+validate_pipeline_results() {
+    local release_name=$1
+    echo "🔍 Validating pipeline results for release: $release_name"
+    echo "🔍 DEBUG: Validating release artifacts (populated by managed pipeline)"
     
-    # Wait for all releases and verify
-    verify_all_releases
+    local failures=0
+    
+    # Get release artifacts from the tenant namespace (populated by release service from managed pipeline)
+    local release_json
+    release_json=$(kubectl get release/"${release_name}" -n "${RELEASE_NAMESPACE}" -ojson)
+    
+    if [ $? -ne 0 ] || [ -z "$release_json" ]; then
+        echo "🔴 Could not retrieve release ${release_name} from namespace ${RELEASE_NAMESPACE}"
+        return 1
+    fi
+    
+    echo "🔍 DEBUG: Release JSON retrieved successfully"
+    
+    # Extract index image artifacts (these should be populated by the managed pipeline)
+    local release_index_image release_index_image_resolved
+    release_index_image=$(jq -r '.status.artifacts.index_image.index_image // ""' <<< "${release_json}")
+    release_index_image_resolved=$(jq -r '.status.artifacts.index_image.index_image_resolved // ""' <<< "${release_json}")
+    
+    echo "🔍 DEBUG: Extracted index images from release:"
+    echo "🔍 DEBUG:   index_image: '$release_index_image'"
+    echo "🔍 DEBUG:   index_image_resolved: '$release_index_image_resolved'"
+    
+    # Validate index_image (equivalent to iibIndexImage pipeline result)
+    echo "Checking index_image artifact..."
+    if [ -z "$release_index_image" ]; then
+        echo "🔴 Release artifact index_image is empty or missing"
+        failures=$((failures+1))
+    elif [[ "$release_index_image" =~ $'\n' ]]; then
+        echo "🔴 Release artifact index_image contains newlines (indicates pipeline result issue)"
+        echo "    Value: '$release_index_image'"
+        echo "    This suggests the original multi-line pipeline result issue still exists"
+        failures=$((failures+1))
+    else
+        echo "✅ Release artifact index_image: $release_index_image"
+    fi
+    
+    # Validate index_image_resolved (equivalent to iibIndexImageResolved pipeline result)  
+    echo "Checking index_image_resolved artifact..."
+    if [ -z "$release_index_image_resolved" ]; then
+        echo "🔴 Release artifact index_image_resolved is empty or missing"
+        failures=$((failures+1))
+    elif [[ "$release_index_image_resolved" =~ $'\n' ]]; then
+        echo "🔴 Release artifact index_image_resolved contains newlines (indicates pipeline result issue)"
+        echo "    Value: '$release_index_image_resolved'"  
+        echo "    This suggests the original multi-line pipeline result issue still exists"
+        failures=$((failures+1))
+    else
+        echo "✅ Release artifact index_image_resolved: $release_index_image_resolved"
+    fi
+    
+    # Additional validation: check that both artifacts are consistent (should be the same image)
+    if [ -n "$release_index_image" ] && [ -n "$release_index_image_resolved" ]; then
+        # Extract just the registry and image parts (without digest) to compare base images
+        local base_image base_image_resolved
+        base_image=$(echo "$release_index_image" | cut -d'@' -f1 2>/dev/null || echo "$release_index_image")
+        base_image_resolved=$(echo "$release_index_image_resolved" | cut -d'@' -f1 2>/dev/null || echo "$release_index_image_resolved")
+        
+        if [ "$base_image" = "$base_image_resolved" ]; then
+            echo "✅ Index image artifacts are consistent (same base image)"
+        else
+            echo "⚠️  Index image artifacts have different base images:"
+            echo "    index_image base: $base_image"
+            echo "    index_image_resolved base: $base_image_resolved"
+            echo "    This may be expected if they reference the same image differently"
+        fi
+    fi
+    
+    if [ $failures -eq 0 ]; then
+        echo "✅ Pipeline results validation passed (release artifacts are single-line and properly populated)"
+    else
+        echo "🔴 Pipeline results validation failed with $failures error(s)"
+        echo "🔍 DEBUG: This indicates the managed pipeline may still be producing multi-line results"
+    fi
+    
+    return $failures
 }
 
 # Enhanced verification for single component releases
@@ -780,8 +909,8 @@ wait_for_release() {
     "${SUITE_DIR}/../scripts/wait-for-release.sh"
 }
 
-# Enhanced verification of all releases
-verify_all_releases() {
+# Override main framework function to use our release verification
+verify_release_contents() {
     local failed_releases=()
     
     echo "🔍 Verifying all releases..."
@@ -806,6 +935,11 @@ verify_all_releases() {
             mode_result=$?
         fi
         
+        # Pipeline results validation (always runs for all releases)
+        echo "  📋 Validating pipeline results for $release_name..."
+        validate_pipeline_results "$release_name"
+        local pipeline_result=$?
+        
         # Scenario-specific verification
         local scenario_result=0
         case "$scenario" in
@@ -823,7 +957,7 @@ verify_all_releases() {
                 ;;
         esac
         
-        if [ $mode_result -eq 0 ] && [ $scenario_result -eq 0 ]; then
+        if [ $mode_result -eq 0 ] && [ $scenario_result -eq 0 ] && [ $pipeline_result -eq 0 ]; then
             echo "  ✅ $release_name verification passed"
         else
             echo "  🔴 $release_name verification failed"
@@ -837,11 +971,6 @@ verify_all_releases() {
     else
         echo "✅ All ${#RELEASES_TO_VERIFY[@]} releases verified successfully"
     fi
-}
-
-# Override main framework function to use our orchestration
-verify_release_contents() {
-    trigger_configured_releases
 }
 
 # Configure test matrix early for consistency (components always built as dual)

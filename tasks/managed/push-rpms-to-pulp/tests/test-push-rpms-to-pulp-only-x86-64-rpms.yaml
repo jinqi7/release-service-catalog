@@ -2,12 +2,10 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: test-push-rpm-data-to-pyxis-cyclonedx
+  name: test-push-rpms-to-pulp-only-x86-64-rpms
 spec:
   description: |
-    Run the push-rpm-data-to-pyxis task with required parameters and single arch
-    images - a happy path scenario. The sboms are in cyclonedx format, so
-    upload_rpm_data_cyclonedx script will be used.
+    Run the push-rpms-to-pulp task with required parameters - but only x86_64 rpms are expected.
   params:
     - name: ociStorage
       description: The OCI repository where the Trusted Artifacts are stored.
@@ -50,38 +48,26 @@ spec:
               value: "$(params.trustedArtifactsDebug)"
         steps:
           - name: setup-values
-            image: quay.io/konflux-ci/release-service-utils:fe734aa04168690e96f0a729f93845e7c70b7934
+            image: quay.io/konflux-ci/release-service-utils:d39d3af868c7136f7e4bffb32d1e625398d6264a
             script: |
               #!/usr/bin/env bash
               set -eux
 
-              mkdir -p "$(params.dataDir)"
-              cat > "$(params.dataDir)/pyxis_data.json" << EOF
+              mkdir -p "$(params.dataDir)/$(context.pipelineRun.uid)"
+              cat > "$(params.dataDir)/$(context.pipelineRun.uid)/snapshot_spec.json" << EOF
               {
+                "application": "rpms",
+                "artifacts": {},
                 "components": [
                   {
-                    "containerImage": "imageurl1",
-                    "pyxisImages": [
-                      {
-                        "arch": "amd64",
-                        "imageId": "myImageID1cyclonedx",
-                        "digest": "mydigest1",
-                        "arch_digest": "mydigest1",
-                        "os": "linux"
+                    "containerImage": "quay.io/test/onlyrpms@sha256:12345",
+                    "name": "test",
+                    "source": {
+                      "git": {
+                        "revision": "32c8f78c26e5831a87aa865ea80452fadbb3a95e",
+                        "url": "https://gitlab.example.com/rpms/test"
                       }
-                    ]
-                  },
-                  {
-                    "containerImage": "imageurl2",
-                    "pyxisImages": [
-                      {
-                        "arch": "amd64",
-                        "imageId": "myImageID3cyclonedx",
-                        "digest": "mydigest2",
-                        "arch_digest": "mydigest2",
-                        "os": "linux"
-                      }
-                    ]
+                    }
                   }
                 ]
               }
@@ -98,14 +84,16 @@ spec:
                 value: $(results.sourceDataArtifact.path)
     - name: run-task
       taskRef:
-        name: push-rpm-data-to-pyxis
+        name: push-rpms-to-pulp
       params:
-        - name: pyxisJsonPath
-          value: pyxis_data.json
-        - name: pyxisSecret
-          value: test-push-rpm-data-to-pyxis-cert
-        - name: server
-          value: production
+        - name: SNAPSHOT_PATH
+          value: "$(context.pipelineRun.uid)/snapshot_spec.json"
+        - name: PULP_DOMAIN
+          value: "mydomain"
+        - name: PULP_SECRET_NAME
+          value: "pulp-task-pulp-secret"
+        - name: resultsDirPath
+          value: "$(context.pipelineRun.uid)/results"
         - name: ociStorage
           value: $(params.ociStorage)
         - name: orasOptions
@@ -158,27 +146,50 @@ spec:
               - name: sourceDataArtifact
                 value: $(params.sourceDataArtifact)
           - name: check-result
-            image: quay.io/konflux-ci/release-service-utils:fe734aa04168690e96f0a729f93845e7c70b7934
+            image: quay.io/konflux-ci/release-service-utils:d39d3af868c7136f7e4bffb32d1e625398d6264a
             script: |
               #!/usr/bin/env bash
               set -eux
 
-              if [ "$(wc -l < "$(params.dataDir)/mock_cosign.txt")" != 2 ]; then
-                echo Error: cosign was expected to be called 2 times. Actual calls:
-                cat "$(params.dataDir)/mock_cosign.txt"
+              ls -lR "$(params.dataDir)"
+
+              results=$(cat "$(params.dataDir)/$(context.pipelineRun.uid)/results/push-rpms-to-pulp-results.json")
+              echo "$results"
+
+              if [ "$(wc -l < "$(params.dataDir)/mock_oras.txt")" != 1 ]; then
+                echo Error: oras was expected to be called 1 time. Actual calls:
+                cat "$(params.dataDir)/mock_oras.txt"
                 exit 1
               fi
 
-              if [ "$(wc -l < \
-                "$(params.dataDir)/mock_upload_rpm_data_cyclonedx.txt")" != 2 ]; then
-                echo Error: upload_rpm_data_cyclonedx was expected to be called 2 times. Actual calls:
-                cat "$(params.dataDir)/mock_upload_rpm_data_cyclonedx.txt"
+              if [ "$(wc -l < "$(params.dataDir)/mock_pulp.txt")" != 3   ]; then
+                echo Error: pulp was expected to be called 3 times. Actual calls:
+                cat "$(params.dataDir)/mock_pulp.txt"
                 exit 1
               fi
 
-              if [ "$(wc -l < "$(params.dataDir)/mock_select-oci-auth.txt")" != 2 ]; then
-                echo Error: select-oci-with was expected to be called 2 times. Actual calls:
-                cat "$(params.dataDir)/mock_select-oci-auth.txt"
+              # count how many rpmfiles are in the results
+              if [ "$(echo "$results" | jq '.rpmfiles | length')" != 1 ]; then
+                echo Error: there should be 1 rpmfile in the results. Actual results:
+                echo "$results"
+                exit 1
+              fi
+              # count how x86_64 rpmfiles are in the results
+              if [ "$(echo "$results" | jq '.rpmfiles | map(select(.arch == "x86_64")) | length')" != 1 ]; then
+                echo Error: there should be 1 x86_64 rpmfile in the results. Actual results:
+                echo "$results"
+                exit 1
+              fi
+              # count how noarch rpmfiles are in the results
+              if [ "$(echo "$results" | jq '.rpmfiles | map(select(.arch == "noarch")) | length')" != 0 ]; then
+                echo Error: there should be 0 noarch rpmfiles in the results. Actual results:
+                echo "$results"
+                exit 1
+              fi
+              # count how source rpmfiles are in the results
+              if [ "$(echo "$results" | jq '.rpmfiles | map(select(.arch == "source")) | length')" != 0 ]; then
+                echo Error: there should be 0 source rpmfiles in the results. Actual results:
+                echo "$results"
                 exit 1
               fi
       runAfter:
