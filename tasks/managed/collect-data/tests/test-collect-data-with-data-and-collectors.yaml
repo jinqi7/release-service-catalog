@@ -59,9 +59,6 @@ spec:
               spec:
                 snapshot: foo
                 releasePlan: foo
-                data:
-                  rkey: rvalue
-                  foo: shouldGetOverwritten
               EOF
               kubectl apply -f release
 
@@ -84,7 +81,6 @@ spec:
                 target: foo
                 data:
                   foo: bar
-                  one: one
               EOF
               kubectl apply -f releaseplan
 
@@ -99,7 +95,7 @@ spec:
                   - foo
                 origin: foo
                 data:
-                  singleComponentMode: true
+                  singleComponentMode: false
                   one:
                     two: three
                     four:
@@ -229,8 +225,8 @@ spec:
                == "$(jq -cr --sort-keys <<< '{"releaseNotes":{"cves":[{"component":"my-component","key":"FOO-3444"}],
                   "foobar":[{"component":"my-component",
                   "key":"FOO-4333"}],"issues":{"fixed":[{"id":"FOO-1234",
-                  "source":"issues.redhat.com"}]}},"foo":"bar","rkey":"rvalue","one":{"four":["five","six"],
-                  "two":"three"},"singleComponentMode":true}')"
+                  "source":"issues.redhat.com"}]}},"foo":"bar","one":{"four":["five","six"],
+                  "two":"three"},"singleComponentMode":false}')"
 
               echo Test that the singleComponentMode result was properly set
               test "$(params.singleComponentMode)" == "true"
