@@ -27,10 +27,10 @@ spec:
     - name: osidb-service-account-vol
       secret:
         secretName: osidb-service-account
-        defaultMode: 0400
+        defaultMode: 0444
   steps:
     - name: check-embargoed-cves
-      image: quay.io/konflux-ci/release-service-utils:002e438fd71196a7b4613308025358476acc1f8e
+      image: quay.io/konflux-ci/release-service-utils:02a8ddcd16113371a255fd1ef0a196399d300162
       computeResources:
         limits:
           memory: 32Mi
