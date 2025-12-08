@@ -217,11 +217,11 @@ cleanup_resources() {
 decrypt_secrets() {
     local suite_dir=$1
     echo "Checking and decrypting secrets..."
-    mkdir -p "${suite_dir}/resources/tenant/secrets"
-    mkdir -p "${suite_dir}/resources/managed/secrets"
+    mkdir -p "${suite_dir}/tenant/secrets"
+    mkdir -p "${suite_dir}/managed/secrets"
 
-    local tenant_secrets_file="${suite_dir}/resources/tenant/secrets/tenant-secrets.yaml"
-    local managed_secrets_file="${suite_dir}/resources/managed/secrets/managed-secrets.yaml"
+    local tenant_secrets_file="${suite_dir}/tenant/secrets/tenant-secrets.yaml"
+    local managed_secrets_file="${suite_dir}/managed/secrets/managed-secrets.yaml"
 
     if [ ! -f "${tenant_secrets_file}" ]; then
       echo "Tenant secrets missing...decrypting ${suite_dir}/vault/tenant-secrets.yaml"
@@ -239,7 +239,7 @@ decrypt_secrets() {
 
     # Decrypt infrastructure secrets if they exist (these persist across test runs)
     local managed_infra_secrets_vault="${suite_dir}/vault/managed-infra-secrets.yaml"
-    local managed_infra_secrets_file="${suite_dir}/resources/managed/secrets/managed-infra-secrets.yaml"
+    local managed_infra_secrets_file="${suite_dir}/managed/secrets/managed-infra-secrets.yaml"
     if [ -f "${managed_infra_secrets_vault}" ]; then
       if [ ! -f "${managed_infra_secrets_file}" ]; then
         echo "Managed infra secrets missing...decrypting ${managed_infra_secrets_vault}"
@@ -280,7 +280,7 @@ setup_namespaces() {
 
 # Function to create Kubernetes resources
 # Modifies global variable: tmpDir
-# Relies on global variables: SUITE_DIR
+# Relies on global variables: TC_DIR
 create_kubernetes_resources() {
     echo "Creating Kubernetes resources..."
     # tmpDir is made global by not declaring it local
@@ -288,7 +288,7 @@ create_kubernetes_resources() {
     echo "Temporary directory for resources: ${tmpDir}"
 
     # Apply infrastructure secrets first (if they exist) - these persist across test runs
-    local managed_infra_secrets_file="${SUITE_DIR}/resources/managed/secrets/managed-infra-secrets.yaml"
+    local managed_infra_secrets_file="${SUITE_DIR}/common/managed/secrets/managed-infra-secrets.yaml"
     if [ -f "${managed_infra_secrets_file}" ]; then
         echo "Applying infrastructure secrets (these persist across test runs)..."
         envsubst < "${managed_infra_secrets_file}" > "$tmpDir/managed-infra-resources.yaml"
@@ -296,11 +296,11 @@ create_kubernetes_resources() {
     fi
 
     echo "Building and applying tenant resources..."
-    kustomize build "${SUITE_DIR}/resources/tenant" | envsubst > "$tmpDir/tenant-resources.yaml"
+    kustomize --load-restrictor=LoadRestrictionsNone build "${TC_DIR}/tenant" | envsubst > "$tmpDir/tenant-resources.yaml"
     kubectl create -f "$tmpDir/tenant-resources.yaml"
 
     echo "Building and applying managed resources..."
-    kustomize build "${SUITE_DIR}/resources/managed" | envsubst > "$tmpDir/managed-resources.yaml"
+    kustomize --load-restrictor=LoadRestrictionsNone build "${TC_DIR}/managed" | envsubst > "$tmpDir/managed-resources.yaml"
     kubectl apply -f "$tmpDir/managed-resources.yaml"
 
     echo "Kubernetes resources applied."
@@ -312,7 +312,7 @@ create_kubernetes_resources() {
 wait_for_component_initialization() {
     echo "Waiting for component ${component_name} in namespace ${tenant_namespace} to be initialized..."
 
-    local max_attempts=60  # 10 minutes with 10-second intervals
+    local max_attempts=200  # 10 minutes with 10-second intervals
     local attempt=1
     local component_annotations=""
     local initialization_success=false

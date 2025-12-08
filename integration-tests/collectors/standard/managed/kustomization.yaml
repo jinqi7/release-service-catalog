@@ -1,0 +1,11 @@
+---
+kind: Kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+
+namespace: ${managed_namespace}
+resources:
+  - ../../common/managed/sa.yaml
+  - ../../common/managed/sa-rolebinding.yaml
+  - rpa.yaml
+  - ../../common/managed/ec-policy.yaml
+  - ../../common/managed/secrets/managed-secrets.yaml
