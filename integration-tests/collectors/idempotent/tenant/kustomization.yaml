@@ -1,0 +1,12 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ${tenant_namespace}
+resources:
+  - ../../common/tenant/application.yaml
+  - ../../common/tenant/component.yaml
+  - ../../common/tenant/rp.yaml
+  - ../../common/tenant/sa.yaml
+  - ../../common/tenant/sa-rolebinding.yaml
+  - ../../common/tenant/secrets/tenant-secrets.yaml

@@ -267,7 +267,7 @@ patch_component_source_before_merge() {
   set +x
   # Get secret value from the tenant secrets file and use
   # it for GH_TOKEN
-  secret_value=$(yq '. | select(.metadata.name | contains("pipelines-as-code-secret-")) | .stringData.password' ${SUITE_DIR}/resources/tenant/secrets/tenant-secrets.yaml)
+  secret_value=$(yq '. | select(.metadata.name | contains("pipelines-as-code-secret-")) | .stringData.password' ${SUITE_DIR}/common/tenant/secrets/tenant-secrets.yaml)
   export GH_TOKEN=${secret_value}
 
   # Patch each PaC pipeline to add multi-arch support and source image build

@@ -79,9 +79,17 @@
 
 set -eo pipefail
 
-suite=$1
-if [ -z "$suite" ] ; then
-  echo "🔴 error: missing parameter suite"
+testcase=$1
+if [ -z "$testcase" ]; then
+  echo "🔴 error: missing parameter testcase (expected format: <suite>/<case_name>)"
+  exit 1
+fi
+
+suite=$(dirname "$testcase")
+case_name=$(basename "$testcase")
+
+if [ -z "$suite" ] || [ -z "$case_name" ] || [ "$suite" = "." ] || [ "$case_name" = "." ] || [[ "$testcase" != */* ]]; then
+  echo "🔴 error: testcase argument must be of format <suite>/<case_name>"
   exit 1
 fi
 
@@ -91,11 +99,13 @@ LIB_DIR="${SCRIPT_DIR}/lib"
 
 SUITE_DIR="${SCRIPT_DIR}/${suite}" # e.g. "${SCRIPT_DIR}/fbc-release"
 
+TC_DIR="${SCRIPT_DIR}/${testcase}"
+
 # Source environment variables (ensure this file exists and is correctly populated)
-if [ -f "${SUITE_DIR}/test.env" ]; then
-    . "${SUITE_DIR}/test.env"
+if [ -f "${TC_DIR}/test.env" ]; then
+    . "${TC_DIR}/test.env"
 else
-    echo "error: test.env not found in ${SUITE_DIR}"
+    echo "error: test.env not found in ${TC_DIR}"
     exit 1
 fi
 
@@ -108,10 +118,10 @@ else
 fi
 
 # Source test script (ensure this file exists and is correctly populated)
-if [ -f "${SUITE_DIR}/test.sh" ]; then
-    . "${SUITE_DIR}/test.sh"
+if [ -f "${TC_DIR}/test.sh" ]; then
+    . "${TC_DIR}/test.sh"
 else
-    echo "error: test.sh not found in ${SUITE_DIR}"
+    echo "error: test.sh not found in ${TC_DIR}"
     exit 1
 fi
 
@@ -124,7 +134,7 @@ trap 'cleanup_resources $? $LINENO "$BASH_COMMAND"' EXIT
 check_env_vars "$@" # Pass all args for consistency, though check_env_vars doesn't use them
 parse_options "$@" # Parses options and sets CLEANUP, NO_CVE
 
-decrypt_secrets "${SUITE_DIR}"
+decrypt_secrets "${SUITE_DIR}/common"
 create_github_repository
 patch_component_source
 setup_namespaces # Ensures correct context before resource creation
