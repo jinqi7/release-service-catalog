@@ -58,4 +58,4 @@ rm /tmp/injected-script.sh
 echo "Injection complete. Creating secret..."
 
 kubectl delete secret git-token-secret --ignore-not-found
-kubectl create secret generic git-token-secret --from-literal=gitlab-gr-maintenance-token=MYVERYSECRETTOKEN
+kubectl create secret generic git-token-secret --from-literal=gitlab-gr-maintenance-token=THIS_SHOULD_NOT_BE_EXPOSED

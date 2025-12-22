@@ -91,6 +91,10 @@ LIB_DIR="${SCRIPT_DIR}/lib"
 
 SUITE_DIR="${SCRIPT_DIR}/${suite}" # e.g. "${SCRIPT_DIR}/fbc-release"
 
+# tmpDir is made global by not declaring it local
+tmpDir=$(mktemp -d)
+echo "Temporary directory for resources: ${tmpDir}"
+
 # Source environment variables (ensure this file exists and is correctly populated)
 if [ -f "${SUITE_DIR}/test.env" ]; then
     . "${SUITE_DIR}/test.env"
@@ -119,7 +123,7 @@ fi
 
 # Trap EXIT signal to call cleanup function
 # Pass error code, line number, and command to the cleanup function
-trap 'cleanup_resources $? $LINENO "$BASH_COMMAND"' EXIT
+# trap 'cleanup_resources $? $LINENO "$BASH_COMMAND"' EXIT
 
 check_env_vars "$@" # Pass all args for consistency, though check_env_vars doesn't use them
 parse_options "$@" # Parses options and sets CLEANUP, NO_CVE

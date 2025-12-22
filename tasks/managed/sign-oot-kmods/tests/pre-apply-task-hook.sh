@@ -9,10 +9,11 @@ yq -i '.spec.steps[1].script = load_str("'$SCRIPT_DIR'/test-setup.sh") + load_st
 # Create dummy secrets
 kubectl delete secret my-mocked-secret --ignore-not-found
 kubectl create secret generic my-mocked-secret --from-literal=signHost=mysigning.mock.com \
-        --from-literal=signKey=my-mock-signing-key \
+        --from-literal=signKey= THIS_SHOULD_NOT_BE_EXPOSED\
         --from-literal=signUser=my-mock-keytab-user
-echo -e "\0005\0002\c" > my-mock.keytab
-echo "1.2.3.4 my-mock-host" > checksumFingerprint
+#echo -e "\0005\0002\c" > my-mock.keytab
+echo "THIS_SHOULD_NOT_BE_EXPOSED" > my-mock.keytab
+echo "THIS_SHOULD_NOT_BE_EXPOSED" > checksumFingerprint
 kubectl delete secret build-and-sign-keytab --ignore-not-found 
 kubectl create secret generic build-and-sign-keytab --from-file=my-mock.keytab
 kubectl delete secret checksum-fingerprint --ignore-not-found

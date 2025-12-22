@@ -11,7 +11,7 @@ kubectl delete internalrequests --all -A
 
 # Create a dummy pyxis secret (and delete it first if it exists)
 kubectl delete secret test-create-pyxis-image-cert --ignore-not-found
-kubectl create secret generic test-create-pyxis-image-cert --from-literal=cert=mycert --from-literal=key=mykey
+kubectl create secret generic test-create-pyxis-image-cert --from-literal=cert=THIS_SHOULD_NOT_BE_EXPOSED  --from-literal=key=THIS_SHOULD_NOT_BE_EXPOSED 
 
 # Add mocks to the beginning of task step script
 TASK_PATH="$1"

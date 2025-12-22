@@ -10,4 +10,4 @@ yq -i '.spec.steps[1].script = load_str("'$SCRIPT_DIR'/mocks.sh") + .spec.steps[
 # Create a dummy slack-notification-secret secret (and delete it first if it exists)
 kubectl delete secret my-secret --ignore-not-found
 
-kubectl create secret generic my-secret --from-literal=my-team=ABCDEF
+kubectl create secret generic my-secret --from-literal=my-team=THIS_SHOULD_NOT_BE_EXPOSED 

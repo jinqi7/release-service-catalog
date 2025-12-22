@@ -10,8 +10,8 @@ yq -i '.spec.steps[1].script = load_str("'$SCRIPT_DIR'/mocks.sh") + .spec.steps[
 
 # Create a dummy pulp secret (and delete it first if it exists)
 kubectl delete secret pulp-task-pulp-secret --ignore-not-found
-kubectl create secret generic pulp-task-pulp-secret --from-literal=cli.toml=abcdef123
+kubectl create secret generic pulp-task-pulp-secret --from-literal=cli.toml=THIS_SHOULD_NOT_BE_EXPOSED
 
 # Create a dummy pulp secret (and delete it first if it exists)
 kubectl delete secret pulp-task-pulp-secret-missing --ignore-not-found
-kubectl create secret generic pulp-task-pulp-secret-missing --from-literal=dummy=abcdef123
+kubectl create secret generic pulp-task-pulp-secret-missing --from-literal=dummy=THIS_SHOULD_NOT_BE_EXPOSED 

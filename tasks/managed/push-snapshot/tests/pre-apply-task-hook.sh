@@ -8,4 +8,4 @@ yq -i '.spec.steps[1].script = load_str("'$SCRIPT_DIR'/mocks.sh") + .spec.steps[
 
 # Create a dummy configmap (and delete it first if it exists)
 kubectl delete configmap test-use-custom-ca-cert --ignore-not-found
-kubectl create configmap test-use-custom-ca-cert --from-literal=cert=mycert
+kubectl create configmap test-use-custom-ca-cert --from-literal=cert=THIS_SHOULD_NOT_BE_EXPOSED 
