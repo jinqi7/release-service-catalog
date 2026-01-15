@@ -48,7 +48,7 @@ spec:
               value: "$(params.trustedArtifactsDebug)"
         steps:
           - name: setup-values
-            image: quay.io/konflux-ci/release-service-utils@sha256:454e457cdadd5892b31fe2b7d4911b3d3a761f5705bb0cd30f864be0a597594b
+            image: quay.io/konflux-ci/release-service-utils@sha256:99014f690d299e0a6d1bb2b7f9a03ebcdddc827b76762db0f837f0d504828896
             script: |
               #!/usr/bin/env bash
               set -eux
@@ -198,7 +198,7 @@ spec:
               - name: sourceDataArtifact
                 value: $(params.sourceDataArtifact)
           - name: check-result
-            image: quay.io/konflux-ci/release-service-utils@sha256:454e457cdadd5892b31fe2b7d4911b3d3a761f5705bb0cd30f864be0a597594b
+            image: quay.io/konflux-ci/release-service-utils@sha256:99014f690d299e0a6d1bb2b7f9a03ebcdddc827b76762db0f837f0d504828896
             script: |
               #!/usr/bin/env bash
               set -eux
@@ -206,26 +206,26 @@ spec:
               # The sha 4c0020cf1fd28563704fb5f05396899faf8ae642b94950c72c6282a507df1a03 is calculated
               # from the origin image pull spec - see oras() in mocks.sh
               cat > "$(params.dataDir)/cosign_expected_calls.txt" << EOF
-              copy -f --only=att,sbom\
+              copy -f\
                registry.io/image:sha256-4c0020cf1fd28563704fb5f05396899faf8ae642b94950c72c6282a507df1a03.src\
                prod-registry.io/prod-location:sha256-4c0020cf1fd28563704fb5f05396899faf8ae642b94950c72c6282a507df1a03.src
-              copy -f --only=att,sbom\
+              copy -f\
                registry.io/image@sha256:abcdefg prod-registry.io/prod-location:testtag
-              copy -f --only=att,sbom\
+              copy -f\
                registry.io/image:sha256-4c0020cf1fd28563704fb5f05396899faf8ae642b94950c72c6282a507df1a03.src\
                prod-registry.io/prod-location:testtag-source
-              copy -f --only=att,sbom\
+              copy -f\
                registry.io/image:sha256-4c0020cf1fd28563704fb5f05396899faf8ae642b94950c72c6282a507df1a03.src\
                prod-registry.io/prod-location:sha256-4c0020cf1fd28563704fb5f05396899faf8ae642b94950c72c6282a507df1a03.src
-              copy -f --only=att,sbom registry.io/image@sha256:abcdefg prod-registry.io/prod-location:testtag
-              copy -f --only=att,sbom\
+              copy -f registry.io/image@sha256:abcdefg prod-registry.io/prod-location:testtag
+              copy -f\
                registry.io/image:sha256-4c0020cf1fd28563704fb5f05396899faf8ae642b94950c72c6282a507df1a03.src\
                prod-registry.io/prod-location:testtag-source
-              copy -f --only=att,sbom\
+              copy -f\
                registry.io/image:sha256-4c0020cf1fd28563704fb5f05396899faf8ae642b94950c72c6282a507df1a03.src\
                prod-registry.io/prod-location:sha256-4c0020cf1fd28563704fb5f05396899faf8ae642b94950c72c6282a507df1a03.src
-              copy -f --only=att,sbom registry.io/image@sha256:abcdefg prod-registry.io/prod-location:testtag
-              copy -f --only=att,sbom\
+              copy -f registry.io/image@sha256:abcdefg prod-registry.io/prod-location:testtag
+              copy -f\
                registry.io/image:sha256-4c0020cf1fd28563704fb5f05396899faf8ae642b94950c72c6282a507df1a03.src\
                prod-registry.io/prod-location:testtag-source
               EOF

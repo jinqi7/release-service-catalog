@@ -7,7 +7,7 @@ function cosign() {
   echo Mock cosign called with: $*
   echo $* >> "$(params.dataDir)/mock_cosign.txt"
 
-  if [[ "$*" == "copy -f --only=att,sbom registry.io/parallel-image:tag"*" "*":"* ]]
+  if [[ "$*" == "copy -f registry.io/parallel-image:tag"*" "*":"* ]]
   then
     LOCK_FILE="$(params.dataDir)/${RANDOM}.lock"
     touch $LOCK_FILE
@@ -20,14 +20,14 @@ function cosign() {
   fi
 
   # mock cosign failing for the no-permission test
-  if [[ "$*" == "copy -f --only=att,sbom registry.io/no-permmission:tag "*":"* ]]
+  if [[ "$*" == "copy -f registry.io/no-permmission:tag "*":"* ]]
   then
     echo Invalid credentials for registry.io/no-permmission:tag
     return 1
   fi
 
   # mock cosign failing the first 3x for the retry test
-  if [[ "$*" == "copy -f --only=att,sbom registry.io/retry-image:tag "*":"* ]]
+  if [[ "$*" == "copy -f registry.io/retry-image:tag "*":"* ]]
   then
     if [[ "$(wc -l < "$(params.dataDir)/mock_cosign.txt")" -le 3 ]]
     then
@@ -36,7 +36,7 @@ function cosign() {
     fi
   fi
 
-  if [[ "$*" == "copy -f --only=att,sbom private-registry.io/image:tag "*":"* ]]
+  if [[ "$*" == "copy -f private-registry.io/image:tag "*":"* ]]
   then
     if [[ $(cat /etc/ssl/certs/ca-custom-bundle.crt) != "mycert" ]]
     then
@@ -45,7 +45,7 @@ function cosign() {
     fi
   fi
 
-  if [[ "$*" != "copy -f --only=att,sbom "*":"*" "*":"* ]]
+  if [[ "$*" != "copy -f "*":"*" "*":"* ]]
   then
     echo Error: Unexpected call
     exit 1
@@ -91,6 +91,11 @@ function oras() {
   fi
   # Accept oras cp -r calls (used to copy image and its attached artifacts)
   if [[ "$1" == "cp" && "$2" == "-r" ]]; then
+    # Simulate success
+    return 0
+  fi
+  # Accept oras cp calls without -r (used for migration artifact copying)
+  if [[ "$1" == "cp" && "$2" == "--from-registry-config" ]]; then
     # Simulate success
     return 0
   fi

@@ -50,7 +50,7 @@ spec:
               value: "$(params.trustedArtifactsDebug)"
         steps:
           - name: setup-values
-            image: quay.io/konflux-ci/release-service-utils@sha256:454e457cdadd5892b31fe2b7d4911b3d3a761f5705bb0cd30f864be0a597594b
+            image: quay.io/konflux-ci/release-service-utils@sha256:f10b4ad888634a7633f76ede29003ce1471aec2b76a7d9e01ad282a3011eb78f
             script: |
               #!/usr/bin/env sh
               set -eux
@@ -162,7 +162,7 @@ spec:
               - name: sourceDataArtifact
                 value: $(params.sourceDataArtifact)
           - name: check-result
-            image: quay.io/konflux-ci/release-service-utils@sha256:454e457cdadd5892b31fe2b7d4911b3d3a761f5705bb0cd30f864be0a597594b
+            image: quay.io/konflux-ci/release-service-utils@sha256:f10b4ad888634a7633f76ede29003ce1471aec2b76a7d9e01ad282a3011eb78f
             script: |
               #!/usr/bin/env bash
               set -eux
@@ -180,3 +180,8 @@ spec:
               )" == '[{"name":"build-date","value":"2024-07-29T02:17:29"},'\
               '{"name":"com.redhat.component","value":"app01"},'\
               '{"name":"description","value":"it is some app"}]'
+
+              echo "Test that component 0 has the correct annotations"
+              test "$(
+                jq -c '.components[0] | .metadata.annotations // []' < "$TEST_SNAPSHOT"
+              )" == '[{"name":"org.opencontainers.image.created","value":"2024-07-29T02:17:29Z"}]'

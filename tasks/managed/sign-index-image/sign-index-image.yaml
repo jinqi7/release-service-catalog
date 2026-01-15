@@ -9,12 +9,12 @@ metadata:
 spec:
   description: |-
     Creates an InternalRequest to sign an index image
-    
+
     ## Signing data parameters
-    
+
      The signing configuration should be set as `data.sign` in the _releasePlanAdmission_. Previously it used to be
      set also in the `data.fbc`. The data should be set in the _ReleasePlanAdmission_ as follows:
-    
+
     ```
     data:
         sign:
@@ -121,7 +121,7 @@ spec:
 
   stepTemplate:
     securityContext:
-      runAsUser: 1001 
+      runAsUser: 1001
     volumeMounts:
       - mountPath: /var/workdir
         name: workdir
@@ -158,7 +158,7 @@ spec:
         - name: sourceDataArtifact
           value: $(params.sourceDataArtifact)
     - name: sign-index-image
-      image: quay.io/konflux-ci/release-service-utils@sha256:454e457cdadd5892b31fe2b7d4911b3d3a761f5705bb0cd30f864be0a597594b
+      image: quay.io/konflux-ci/release-service-utils@sha256:f10b4ad888634a7633f76ede29003ce1471aec2b76a7d9e01ad282a3011eb78f
       computeResources:
         limits:
           memory: 1Gi
@@ -207,6 +207,12 @@ spec:
 
         export PYXIS_CERT_PATH=/tmp/crt
         export PYXIS_KEY_PATH=/tmp/key
+
+        jqquery='.data|if has ("SIG_KEY_NAMES")
+        then (.SIG_KEY_NAMES|split(",")|.[]|gsub("^\\s+|\\s+$";"")) else .SIG_KEY_NAME end'
+        config_map_name=$(jq -r '.sign.configMapName // "signing-config-map"' "${DATA_FILE}")
+        configMapJson=$(kubectl get "cm/${config_map_name:?}" -ojson)
+        SIG_KEY_NAMES=$(jq -er "$jqquery" <<< "${configMapJson}")
 
         requestType=$(jq -r '.requestType // "internal-request"' "${DATA_FILE}")
         if [ "${requestType}" == "internal-pipelinerun" ] ; then
@@ -281,6 +287,7 @@ spec:
               -p repositories="${repos_batch}" \
               -p requester="$(params.requester)" \
               -p config_map_name="${config_map_name}" \
+              -p signing_key_names="${SIG_KEY_NAMES}" \
               -p taskGitUrl="$(params.taskGitUrl)" \
               -p taskGitRevision="$(params.taskGitRevision)" \
               -l ${TASK_LABEL}="${TASK_ID}" \
@@ -316,6 +323,7 @@ spec:
             -p repositories="${repos_batch[*]}" \
             -p config_map_name="${config_map_name}" \
             -p requester="$(params.requester)" \
+            -p signing_key_names="${SIG_KEY_NAMES}" \
             -p taskGitUrl="$(params.taskGitUrl)" \
             -p taskGitRevision="$(params.taskGitRevision)" \
             -l ${TASK_LABEL}="${TASK_ID}" \

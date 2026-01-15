@@ -86,7 +86,7 @@ spec:
         - name: sourceDataArtifact
           value: $(params.sourceDataArtifact)
     - name: push-to-git
-      image: quay.io/konflux-ci/release-service-utils@sha256:454e457cdadd5892b31fe2b7d4911b3d3a761f5705bb0cd30f864be0a597594b
+      image: quay.io/konflux-ci/release-service-utils@sha256:f10b4ad888634a7633f76ede29003ce1471aec2b76a7d9e01ad282a3011eb78f
       computeResources:
         limits:
           memory: 1Gi
@@ -169,17 +169,10 @@ spec:
                 return 1
             fi
 
-            # Copy architecture-specific checksum file
-            if [ "$arch_count" -gt 1 ]; then
-                if [ -f "$source_dir/signed_kmods_checksums_${arch_name}.txt" ]; then
-                    cp "$source_dir/signed_kmods_checksums_${arch_name}.txt" "$TARGET_DIR/"
-                    echo "Copied architecture-specific checksums for $arch_name"
-                fi
-            else
-                if [ -f "$source_dir/signed_kmods_checksums.txt" ]; then
-                    cp "$source_dir/signed_kmods_checksums.txt" "$TARGET_DIR/"
-                    echo "Copied checksums for single architecture"
-                fi
+            # Copy architecture-specific checksum file (always use arch suffix)
+            if [ -f "$source_dir/signed_kmods_checksums_${arch_name}.txt" ]; then
+                cp "$source_dir/signed_kmods_checksums_${arch_name}.txt" "$TARGET_DIR/"
+                echo "Copied architecture-specific checksums for $arch_name"
             fi
 
             # Copy envfile for reference
@@ -264,14 +257,14 @@ spec:
             echo "Detected architecture: $actual_arch"
 
             cd "$arch_dir"
-            # Validate checksum file exists for single-arch
-            if [ ! -f "signed_kmods_checksums.txt" ]; then
-                echo "ERROR: signed_kmods_checksums.txt not found for single architecture build"
+            # Validate checksum file exists for single-arch (arch-specific filename)
+            if [ ! -f "signed_kmods_checksums_${actual_arch}.txt" ]; then
+                echo "ERROR: signed_kmods_checksums_${actual_arch}.txt not found for single architecture build"
                 exit 1
             fi
 
             # Verify checksums
-            sha256sum -c signed_kmods_checksums.txt
+            sha256sum -c "signed_kmods_checksums_${actual_arch}.txt"
             cd "${GIT_WORK_DIR}/local-artifacts"
 
             if push_arch_artifacts "$actual_arch" "$arch_dir"; then
@@ -282,7 +275,7 @@ spec:
             fi
         fi
 
-        # Commit and push all changes
+        # Commit and push all changes with retry logic to handle race conditions
         if git status --porcelain | grep -q '^[ AM]'; then
             commit_message="Automated push from Build and Sign pipeline"
             if [ "$arch_count" -gt 1 ]; then
@@ -290,8 +283,42 @@ spec:
             fi
 
             git commit -m "$commit_message"
-            git push -u origin "$(params.gitBranch)"
-            echo "Successfully pushed artifacts for $arch_count architecture(s) to Git"
+
+            # Get batch size from envfile for retry attempts (default to 1 if not set)
+            max_attempts="${BATCH_SIZE:-1}"
+            echo "Using BATCH_SIZE=${max_attempts} for push retry attempts"
+
+            attempt=1
+            push_success=false
+
+            while [ $attempt -le "$max_attempts" ]; do
+                echo "Push attempt $attempt of $max_attempts"
+
+                if git push -u origin "$(params.gitBranch)"; then
+                    echo "Successfully pushed artifacts for $arch_count architecture(s) to Git on attempt $attempt"
+                    push_success=true
+                    break
+                else
+                    echo "Push failed on attempt $attempt"
+
+                    if [ $attempt -lt "$max_attempts" ]; then
+                        echo "Pulling latest changes and retrying..."
+                        # Pull with rebase to incorporate remote changes
+                        git pull --rebase origin "$(params.gitBranch)"
+                        attempt=$((attempt + 1))
+                        # Add small delay to reduce contention
+                        sleep 2
+                    else
+                        echo "ERROR: Failed to push after $max_attempts attempts"
+                        exit 1
+                    fi
+                fi
+            done
+
+            if [ "$push_success" = false ]; then
+                echo "ERROR: Failed to push artifacts to Git"
+                exit 1
+            fi
         else
-            echo "No changes to commit"
+            echo "No changes to commit."
         fi
