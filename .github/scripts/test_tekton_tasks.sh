@@ -269,7 +269,8 @@ do
       echo "  PipelineRun $PIPELINERUN in progress (status Unknown). Waiting for update..."
       sleep 5
     done
-    tkn pr logs $PIPELINERUN
+    #tkn pr logs $PIPELINERUN
+    tkn pr logs $PIPELINERUN | grep -v ' ++ ' | grep -v ' + '
 
     PR_STATUS=$(kubectl get pr $PIPELINERUN -o=jsonpath='{.status.conditions[0].status}')
 

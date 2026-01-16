@@ -1,0 +1,42 @@
+title = "Gitleaks Config"
+
+[extend]
+useDefault = false  # Keeps the standard Gitleaks rules active
+
+[[rules]]
+    id = "internal-marker-detected"
+    description = "A sensitive internal marker was found in the code or logs."
+    regex = '''(?i)\+?.*THIS_SHOULD_NOT_BE_EXPOSED'''
+    keywords = ["THIS_SHOULD_NOT_BE_EXPOSED"]
+    severity = "error"
+
+     # This section tells Gitleaks to skip this specific rule for these files
+    [rules.allowlist]
+        paths = ['''pre-apply-task-hook\.sh''']
+
+[[rules]]
+    id = "bash-set-x-cat-secrets"
+# Regex Explanation:
+# (?ims)                     : Flags - i (ignore case), m (multiline: ^ matches line start), s (dot-all: . matches newlines)
+# ^[ \t]*set                 : Matches 'set' at the start of a line, allowing indentation but excluding comments (#)
+# \s+-[^#\n]*x               : Matches flags starting with '-', requiring 'x' and ensuring no '#' (inline comment) follows
+# .*?                        : Non-greedy match across multiple lines to bridge the gap between 'set' and the leak
+# (?:=)                      : Matches the assignment operator (=) to target variable definitions
+# [^ \n]*?                   : Matches optional characters (like quotes or spaces) after the equals sign
+# (?:\$\(|\`)?               : Matches optional command substitution starters: $( or ` (backtick)
+# (?:cat\s+)?                : Matches an optional 'cat' command (covers both direct execution and reading files)
+# (?:/etc/secrets|/mnt/)     : Matches sensitive directory paths defined as high-risk targets
+    regex = '''(?ims)^[ \t]*set\s+-[^#\n]*x.*?(?:=)["']?\s*(?:\$\(|\`)?\s*(?:cat\s+)?["']?(?:/etc/secrets|/mnt/)'''
+    # Here, [^}]*? ensures that no closing curly brace } (which marks the end of a function) appears between set -x and cat."
+    keywords = ["set", "cat", "/etc/secrets", "/mnt"]
+    [rules.allowlist]
+        regexes = [
+            '''(?is)set\s+-[^ \n]*x.*?set\s+\+x.*?cat\s+''',
+            '''(?is)set\s+-[^ \n]*x.*?#!/.*?cat\s+'''
+        ]
+        paths = ['''tasks/internal/check-signing-certificates/check-signing-certificates\.yaml''',
+                 '''tasks/internal/request-and-upload-signature/request-and-upload-signature.yaml''',
+                 '''tasks/internal/push-artifacts-to-cdn-task/push-artifacts-to-cdn-task.yaml''',
+                 '''tasks/internal/update-fbc-catalog-task/update-fbc-catalog-task\.yaml'''
+        ]
+    severity = "high"
