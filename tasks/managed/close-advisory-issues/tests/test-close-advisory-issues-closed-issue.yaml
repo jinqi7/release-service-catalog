@@ -146,10 +146,10 @@ spec:
             image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
             script: |
               #!/usr/bin/env bash
-              set -eux
+              set -eu
 
               if [ "$(wc -l < "$(params.dataDir)/mock_curl.txt")" != 1 ]; then
-                  echo Error: curl was expected to be called 1 time. Actual calls:
+                  # echo Error: curl was expected to be called 1 time. Actual calls:
                   cat "$(params.dataDir)/mock_curl.txt"
                   exit 1
               fi
