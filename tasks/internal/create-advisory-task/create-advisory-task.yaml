@@ -40,7 +40,7 @@ spec:
       description: Name of the PipelineRun that called this task
     - name: contentType
       type: string
-      description: The contentType of the release artifact. One of [image|binary|generic]
+      description: The contentType of the release artifact. One of [image|binary|generic|rpm]
       default: "image"
     - name: caTrustConfigMapName
       type: string
@@ -86,7 +86,7 @@ spec:
       runAsUser: 1001
   steps:
     - name: create-advisory
-      image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+      image: quay.io/konflux-ci/release-service-utils@sha256:a9fc6af1db5fefe43c655b3241326e8115cd9569b810bac7effb33b45dd2a855
       computeResources:
         limits:
           memory: 256Mi
@@ -174,8 +174,9 @@ spec:
           if [ "$(params.contentType)" = "image" ]; then
             echo "Content type is image."
             spec_content_type=".content.images"
-          elif [ "$(params.contentType)" == "binary" ] || [ "$(params.contentType)" == "generic" ]; then
-            echo "Content type is generic artifact."
+          elif [ "$(params.contentType)" == "binary" ] || [ "$(params.contentType)" == "generic" ] \
+          || [ "$(params.contentType)" == "rpm" ]; then
+            echo "Content type is generic or rpm artifact."
             spec_content_type=".content.artifacts"
           else
             echo "Unsupported contentType: $(params.contentType)"| tee -a "$STDERR_FILE"
@@ -225,8 +226,20 @@ spec:
               CONTENT_BEFORE_FILTER=$(cat "$CONTENT_FILE")
 
               # Update CONTENT by removing entries that already exist in the advisory
-              if [ "$(params.contentType)" == "generic" ]; then
-                # Use purl as unique key for generic artifacts
+              if [ "$(params.contentType)" == "generic" ] || [ "$(params.contentType)" == "binary" ]; then
+                # Use purl as unique key, but strip checksum= for comparison
+                # This allows re-releases (with new checksums from re-signing) to update existing advisories
+                # The filename= param (if present) ensures we match the correct file
+                jq --slurpfile existing "$EXISTING_CONTENT" '
+                  # Function to strip checksum param from purl for comparison
+                  def strip_checksum:
+                    gsub("&checksum=[^&]*"; "") | gsub("\\?checksum=[^&]*&"; "?") | gsub("\\?checksum=[^&]*$"; "");
+                  map(select(
+                    (.purl | strip_checksum) as $p |
+                    ($existing[0] | map(select((.purl | strip_checksum) == $p)) | length == 0)
+                  ))' "$CONTENT_FILE" > /tmp/content_filtered.json
+              elif [ "$(params.contentType)" == "rpm" ] || [ "$(params.contentType)" == "disk-image" ]; then
+                # Use exact purl matching for RPM and disk-image (checksums are stable, no re-signing)
                 jq --slurpfile existing "$EXISTING_CONTENT" '
                   map(select(
                     .purl as $p |
@@ -316,7 +329,8 @@ spec:
           # group advisories by <origin workspace>/year
           ADVISORY_DIR="data/advisories/$(params.origin)/${YEAR}/${ADVISORY_NUM}"
           mkdir -p "${ADVISORY_DIR}"
-          ADVISORY_FILEPATH="${ADVISORY_DIR}/advisory.yaml"
+          JSON_ADVISORY_FILEPATH="${ADVISORY_DIR}/advisory.json"
+          YAML_ADVISORY_FILEPATH="${ADVISORY_DIR}/advisory.yaml"
           ADVISORY_NAME="${YEAR}:${ADVISORY_NUM}"
 
           # Prepare variables for the advisory template
@@ -325,20 +339,21 @@ spec:
           jq -c --arg advisory_name "$ADVISORY_NAME" --arg advisory_ship_date "$SHIP_DATE" \
             '$ARGS.named + .' /tmp/template_data.json > /tmp/template_data_final.json
 
-          # Create advisory file using the updated apply_template.py with --data-file option
-          /home/utils/apply_template.py -o "$ADVISORY_FILEPATH" --data-file /tmp/template_data_final.json \
-            --verbose --template /home/templates/advisory.yaml.jinja
-
-          cat "$ADVISORY_FILEPATH"
+          # Create advisory file using the apply_template.py script
+          /home/utils/apply_template.py -o "$JSON_ADVISORY_FILEPATH" --data-file /tmp/template_data_final.json \
+          --template /home/templates/advisory.yaml.jinja -v 2> "$STDERR_FILE"
+           
+          # Convert to yaml for readability
+          yq eval -o yaml "$JSON_ADVISORY_FILEPATH" | tee "$YAML_ADVISORY_FILEPATH"
 
           # Ensure the created advisory file passes the advisory schema
-          check-jsonschema --schemafile schema/advisory.json "$ADVISORY_FILEPATH" 2>&1 | tee "$STDERR_FILE"
+          check-jsonschema --schemafile schema/advisory.json "$YAML_ADVISORY_FILEPATH" 2>&1 | tee "$STDERR_FILE"
 
-          git add "${ADVISORY_FILEPATH}"
+          git add "${YAML_ADVISORY_FILEPATH}"
           git commit -m "[Konflux Release] new advisory for $(params.application)"
           echo "Pushing to ${REPO_BRANCH}..."
           git_push_with_retries --branch $REPO_BRANCH --retries 5 --url origin 2> "$STDERR_FILE"
           # Construct the advisory url on customer portal to report back to the user as a result
           ADVISORY_TYPE=$(jq -r '.type' /tmp/advisory_decoded.json)
           ADVISORY_URL="${ADVISORY_URL_PREFIX}/${ADVISORY_TYPE}-${ADVISORY_NAME}"
-          ADVISORY_INTERNAL_URL="${GIT_REPO//\.git/}/-/raw/${REPO_BRANCH}/${ADVISORY_FILEPATH}"
+          ADVISORY_INTERNAL_URL="${GIT_REPO//\.git/}/-/raw/${REPO_BRANCH}/${YAML_ADVISORY_FILEPATH}"

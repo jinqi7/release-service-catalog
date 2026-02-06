@@ -5,7 +5,7 @@ metadata:
   name: test-create-advisory-update-purl
 spec:
   description: |
-    Assert that the update purl step can process the downloadURLs from CGW and generate
+    Assert that the update purl step can process the checksum_map and generate
     the purl field for the releaseNotes
   params:
     - name: ociStorage
@@ -33,6 +33,8 @@ spec:
         results:
           - name: sourceDataArtifact
             type: string
+          - name: checksum_map
+            type: string
         volumes:
           - name: workdir
             emptyDir: {}
@@ -51,7 +53,7 @@ spec:
             runAsUser: 1001
         steps:
           - name: create-crs
-            image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+            image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
             script: |
               #!/usr/bin/env bash
               set -eux
@@ -124,7 +126,7 @@ spec:
                         "files": [
                           {
                             "filename": "helm-windows",
-                            "source": "/releases/helm-windows-amd64.exe.zip",
+                            "source": "/releases/helm-windows-amd64.tar.gz",
                             "arch": "amd64",
                             "os": "windows"
                           },
@@ -153,7 +155,8 @@ spec:
                             "filename": "odo-linux",
                             "source": "odo-linux-amd64.tar.gz",
                             "arch": "amd64",
-                            "os": "linux"
+                            "os": "linux",
+                            "delivery_format": ["compressed", "raw"]
                           }
                         ],
                         "contentGateway": {
@@ -195,6 +198,26 @@ spec:
                 }
               }
               EOF
+
+              # Create checksum_map mock data file (will be read by oras mock)
+              jq -nc '[
+                {
+                  "component": "helm",
+                  "files": {
+                    "helm-windows-amd64.zip": "sha256:38fb333e0c359824a451631e127247d0db44f1ac1de5b9b4d31bd5bb6ec90000",
+                    "helm-linux-amd64.tar.gz": "sha256:d305ee5018571f2aca631da5faf4c87eb5ceced40ec59d134b7d2dd166b82bc6"
+                  }
+                },
+                {
+                  "component": "odo",
+                  "files": {
+                    "odo-linux-amd64.tar.gz": "sha256:e539bb37a2084d381562ed8808f3dca3dc918e1c4917d94e5357f2e97185b415",
+                    "odo-linux-amd64": "sha256:a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890"
+                  }
+                }
+              ]' > "$(params.dataDir)/mock_checksum_map.json"
+              # Output mock OCI reference (oras mock will use the file above)
+              echo -n "mock-registry/checksum-map@sha256:mock" | tee "$(results.checksum_map.path)"
           - name: create-trusted-artifact
             ref:
               name: create-trusted-artifact
@@ -237,6 +260,8 @@ spec:
           value: "http://localhost"
         - name: taskGitRevision
           value: "main"
+        - name: checksum_map
+          value: "$(tasks.setup.results.checksum_map)"
       runAfter:
         - setup
     - name: check-result
@@ -279,7 +304,7 @@ spec:
               - name: sourceDataArtifact
                 value: $(params.sourceDataArtifact)
           - name: check-result
-            image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+            image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
             script: |
               #!/usr/bin/env bash
               set -ex
@@ -315,24 +340,11 @@ spec:
                 exit 1
               fi
 
-              # Assert the three expected PURLs are exactly what's present
-              baseUrl="https://access.cdn.redhat.com/content/origin/files"
-
-              printf -v helmWindowsPath "%s%s" \
-                "sha256/38/38fb333e0c359824a451631e127247d0db44f1ac1de5b9b4d31bd5bb6ec9/" \
-                "helm-windows-amd64.exe.zip"
-
-              printf -v helmLinuxPath "%s%s" \
-                "sha256/d3/d305ee5018571f2aca631da5faf4c87eb5ceced40ec59d134b7d2dd166b82bc6/" \
-                "helm-linux-amd64.tar.gz"
-
-              printf -v odoLinuxPath "%s%s" \
-                "sha256/e5/e539bb37a2084d381562ed8808f3dca3dc918e1c4917d94e5357f2e97185b415/" \
-                "odo-linux-amd64.tar.gz"
-
-              expectedHelmWindowsPurl="pkg:generic/helm@1.5.0?download_url=${baseUrl}/${helmWindowsPath}"
-              expectedHelmLinuxPurl="pkg:generic/helm@1.5.0?download_url=${baseUrl}/${helmLinuxPath}"
-              expectedOdoLinuxPurl="pkg:generic/odo@v3.16.1?download_url=${baseUrl}/${odoLinuxPath}"
+              # Assert the three expected PURLs are exactly what's present (with generic download URLs)
+              # PURLs now include filename= for unique identification and idempotency matching
+              expectedHelmWindowsPurl="pkg:generic/helm@1.5.0?filename=helm-windows-amd64.zip&checksum=sha256:38fb333e0c359824a451631e127247d0db44f1ac1de5b9b4d31bd5bb6ec90000&download_url=https://developers.redhat.com/products"
+              expectedHelmLinuxPurl="pkg:generic/helm@1.5.0?filename=helm-linux-amd64.tar.gz&checksum=sha256:d305ee5018571f2aca631da5faf4c87eb5ceced40ec59d134b7d2dd166b82bc6&download_url=https://developers.redhat.com/products"
+              expectedOdoLinuxPurl="pkg:generic/odo@v3.16.1?filename=odo-linux-amd64.tar.gz&checksum=sha256:e539bb37a2084d381562ed8808f3dca3dc918e1c4917d94e5357f2e97185b415&download_url=https://developers.redhat.com/products"
 
               helmWindowsPurl=$(
                 echo "$artifacts" | jq -r '.[] | select(.component == "helm" and .os == "windows") | .purl')
@@ -360,7 +372,7 @@ spec:
       taskSpec:
         steps:
           - name: delete-crs
-            image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+            image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
             script: |
               #!/usr/bin/env bash
               set -eux

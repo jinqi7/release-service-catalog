@@ -42,7 +42,7 @@ spec:
             type: string
         steps:
           - name: setup-values
-            image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+            image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
             script: |
               #!/usr/bin/env bash
               set -eux
@@ -129,7 +129,7 @@ spec:
               - name: sourceDataArtifact
                 value: $(params.sourceDataArtifact)
           - name: check-multiarch-extraction
-            image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+            image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
             script: |
               #!/usr/bin/env bash
               set -eux
@@ -164,31 +164,60 @@ spec:
               fi
 
               # Check for architecture-specific directories
-              expected_archs=("amd64" "arm64")
+              # Note: These are the ARCH values from envfile, not platform.architecture
+              expected_archs=("x86_64" "aarch64-64k")
               for arch in "${expected_archs[@]}"; do
                 arch_dir="$SIGNED_KMODS_PATH/$arch"
                 if [ -d "$arch_dir" ]; then
                   echo "SUCCESS: Architecture directory found: $arch_dir"
 
-                  # Check for .ko files in this architecture
-                  if ls "$arch_dir"/*.ko 1> /dev/null 2>&1; then
-                    echo "SUCCESS: .ko files found in $arch:"
-                    ls -la "$arch_dir"/*.ko
+                  # Check for .ko files in this architecture (including subdirectories)
+                  ko_count=$(find "$arch_dir" -name "*.ko" -type f | wc -l)
+                  if [ "$ko_count" -gt 0 ]; then
+                    echo "SUCCESS: Found $ko_count .ko files in $arch (including subdirectories):"
+                    find "$arch_dir" -name "*.ko" -type f | sort | while read -r ko_file; do
+                      echo "  $ko_file"
+                    done
+
+                    # Verify recursive extraction worked by checking for files in subdirectories
+                    subdir_ko_count=$(find "$arch_dir" -mindepth 2 -name "*.ko" -type f | wc -l)
+                    if [ "$subdir_ko_count" -gt 0 ]; then
+                      echo "SUCCESS: Found $subdir_ko_count .ko files in subdirectories (recursive extraction working)"
+                      echo "Subdirectory .ko files:"
+                      find "$arch_dir" -mindepth 2 -name "*.ko" -type f | sort | while read -r subdir_ko; do
+                        echo "  $subdir_ko"
+                      done
+                    else
+                      echo "INFO: All .ko files are in top-level directory for $arch"
+                    fi
                   else
                     echo "ERROR: No .ko files found in $arch directory"
                     exit 1
                   fi
 
-                  # Check for envfile
+                  # Check for envfile and verify ARCH variable
                   if [ -f "$arch_dir/envfile" ]; then
                     echo "SUCCESS: envfile found for $arch"
                     cat "$arch_dir/envfile"
+
+                    # Verify ARCH variable matches expected value
+                    # shellcheck source=/dev/null
+                    . "$arch_dir/envfile"
+                    # shellcheck disable=SC2153
+                    if [ "${ARCH}" == "$arch" ]; then
+                      echo "SUCCESS: ARCH variable in envfile matches directory name: $arch"
+                    else
+                      echo "ERROR: ARCH variable mismatch. Expected: $arch, Got: ${ARCH}"
+                      exit 1
+                    fi
                   else
                     echo "ERROR: envfile not found for $arch"
                     exit 1
                   fi
                 else
                   echo "ERROR: Architecture directory not found: $arch_dir"
+                  echo "Available directories:"
+                  ls -la "$SIGNED_KMODS_PATH/" || echo "No directories found"
                   exit 1
                 fi
               done

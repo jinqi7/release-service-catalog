@@ -138,12 +138,9 @@ spec:
             local arch_name="$1"
             local source_dir="$2"
 
-            # Always include architecture suffix for consistent hierarchy
-            local arch_suffix="/${arch_name}"
+            echo "Processing Azure upload for architecture directory: $arch_name"
 
-            echo "Processing Azure upload for architecture: $arch_name"
-
-            # Read envfile to get version information
+            # Read envfile to get version information and ARCH override
             if [ -f "$source_dir/envfile" ]; then
                 # shellcheck source=/dev/null
                 . "$source_dir/envfile"
@@ -152,25 +149,57 @@ spec:
                 return 1
             fi
 
-            AZURE_TARGET_PATH="${DRIVER_VENDOR}/${DRIVER_VERSION}/${KERNEL_VERSION}${arch_suffix}/"
-            echo "Azure target path for $arch_name: ${ACCOUNT}/${CONTAINER}/${AZURE_TARGET_PATH}"
+            # Strip architecture suffix from KERNEL_VERSION (e.g., .aarch64+64k, .x86_64)
+            KERNEL_VERSION_CLEAN=$(echo "$KERNEL_VERSION" | \
+              sed -E 's/\.(x86_64|amd64|aarch64|arm64|ppc64le|s390x)(\+.*)?$//')
+            echo "Original KERNEL_VERSION: $KERNEL_VERSION"
+            echo "Cleaned KERNEL_VERSION: $KERNEL_VERSION_CLEAN"
 
-            # Upload .ko files
-            if ls "$source_dir"/*.ko 1> /dev/null 2>&1; then
-                echo "Uploading .ko files for $arch_name"
-                for f in "$source_dir"/*.ko; do
-                    if [ -f "$f" ]; then
-                        BLOB_NAME="${AZURE_TARGET_PATH}$(basename "$f")"
-                        echo "Uploading ${f} to ${BLOB_NAME}..."
-                        az storage blob upload \
-                          --account-name "$ACCOUNT" \
-                          --container-name "$CONTAINER" \
-                          --name "$BLOB_NAME" \
-                          --file "$f" \
-                          --auth-mode login \
-                          --overwrite
-                    fi
+            # Use ARCH from envfile if available and not MULTI_PLATFORM, otherwise fall back to directory name
+            if [ -n "${ARCH:-}" ] && [ "$ARCH" != "MULTI_PLATFORM" ]; then
+                local final_arch="$ARCH"
+                echo "Using architecture: $final_arch (from envfile ARCH variable)"
+            else
+                local final_arch="$arch_name"
+                if [ "${ARCH:-}" = "MULTI_PLATFORM" ]; then
+                    echo "Using architecture: $final_arch (ARCH=MULTI_PLATFORM, using directory name)"
+                else
+                    echo "Using architecture: $final_arch (from directory name)"
+                fi
+            fi
+            local arch_suffix="/${final_arch}"
+
+            AZURE_TARGET_PATH="${DRIVER_VENDOR}/${DRIVER_VERSION}/${KERNEL_VERSION_CLEAN}${arch_suffix}/"
+            echo "Azure target path: ${ACCOUNT}/${CONTAINER}/${AZURE_TARGET_PATH}"
+
+            # Upload .ko files (with recursive directory structure support)
+            if find "$source_dir" -name "*.ko" -type f | head -1 | grep -q "."; then
+                ko_file_count=$(find "$source_dir" -name "*.ko" -type f | wc -l)
+                echo "Uploading $ko_file_count .ko files for $arch_name (preserving directory structure)"
+
+                # Show directory structure being uploaded for verification
+                echo "Directory structure for $arch_name:"
+                find "$source_dir" -name "*.ko" -type f | sort | head -10 | sed 's|^|  |'
+                if [ "$(find "$source_dir" -name "*.ko" -type f | wc -l)" -gt 10 ]; then
+                    echo "  ... (showing first 10 files)"
+                fi
+
+                # Upload each .ko file preserving the directory structure
+                cd "$source_dir"
+                find . -name "*.ko" -type f | while read -r ko_file; do
+                    # Remove the leading "./" from the path and construct blob name
+                    relative_path="${ko_file#./}"
+                    BLOB_NAME="${AZURE_TARGET_PATH}${relative_path}"
+                    echo "Uploading ${ko_file} to ${BLOB_NAME}..."
+                    az storage blob upload \
+                      --account-name "$ACCOUNT" \
+                      --container-name "$CONTAINER" \
+                      --name "$BLOB_NAME" \
+                      --file "$ko_file" \
+                      --auth-mode login \
+                      --overwrite
                 done
+                cd - > /dev/null
             else
                 echo "WARNING: No .ko files found for architecture $arch_name"
                 return 1
@@ -216,7 +245,10 @@ spec:
                 if [ -n "$first_arch_dir" ] && [ -f "$first_arch_dir/envfile" ]; then
                     # shellcheck source=/dev/null
                     . "$first_arch_dir/envfile"
-                    summary_azure_path="${DRIVER_VENDOR}/${DRIVER_VERSION}/${KERNEL_VERSION}/multi-arch-summary/"
+                    # Strip architecture suffix from KERNEL_VERSION
+                    KERNEL_VERSION_CLEAN=$(echo "$KERNEL_VERSION" | \
+                      sed -E 's/\.(x86_64|amd64|aarch64|arm64|ppc64le|s390x)(\+.*)?$//')
+                    summary_azure_path="${DRIVER_VENDOR}/${DRIVER_VERSION}/${KERNEL_VERSION_CLEAN}/multi-arch-summary/"
 
                     echo "Uploading multi-architecture summary to Azure: ${ACCOUNT}/${CONTAINER}/${summary_azure_path}"
                     az storage blob upload \

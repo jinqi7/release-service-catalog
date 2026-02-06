@@ -24,6 +24,13 @@ spec:
         requires_terms=true), one repository string per line, e.g. "rhtas/cosign-rhel9".
         If empty, no registry.access.redhat.com signatures will be created
       default: ""
+    - name: signExternalRegistries
+      type: string
+      description: |
+        When set to "true", sign images that don't have rh-registry-repo by using the repository
+        url field directly. This is useful for signing images released to external registries
+        like quay.io/konflux-ci. When "false" (default), only sign images with rh-registry-repo
+      default: "false"
     - name: retries
       description: Retry cosign N times
       type: string
@@ -130,7 +137,7 @@ spec:
         - name: sourceDataArtifact
           value: $(params.sourceDataArtifact)
     - name: sign-image
-      image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+      image: quay.io/konflux-ci/release-service-utils@sha256:3cb03b14ac9d90ff27070036ce2b50712e65aa285daeb28852254a745bb25dfc
       computeResources:
         limits:
           memory: 2.5Gi
@@ -181,7 +188,16 @@ spec:
         echo -n "${PUBLIC_KEY:?}" > "$PUBLIC_KEY_FILE"
         ls -ld "$PUBLIC_KEY_FILE"
 
+        # Initialize memory throttling
+        # This file is located at utils/memory-throttle.sh in the release-service-utils image
+        # shellcheck source=/dev/null
+        source memory-throttle.sh
+        # This function is stored in the utils/memory-throttle.sh file
+        log_memory_throttle_status 80
+
         RUNNING_JOBS="\j" # Bash parameter for number of jobs currently running
+        BURST_SIZE=5
+        STABILIZATION_DELAY=2
 
         jobpid(){
             pid=$(cut -d' ' -f4 < /proc/self/stat)
@@ -308,14 +324,6 @@ spec:
                 rh_registry_repo=$(jq -r '."rh-registry-repo" // empty' <<< "$REPOSITORY_OBJECT")
                 registry_access_repo=$(jq -r '."registry-access-repo" // empty' <<< "$REPOSITORY_OBJECT")
 
-                # Skip if no rh-registry-repo (not applicable for signing)
-                if [ "$rh_registry_repo" = "" ] || [ "$rh_registry_repo" = "null" ]; then
-                    echo "No rh-registry-repo found for repository ${INTERNAL_CONTAINER_REF}, skipping signing"
-                    continue
-                fi
-
-                repository="${rh_registry_repo#*/}"
-
                 # Get tags from repository object
                 REPO_TAGS=$(jq -r '.tags[]? // empty' <<< "$REPOSITORY_OBJECT")
                 if [ -z "$REPO_TAGS" ]; then
@@ -323,12 +331,26 @@ spec:
                     continue
                 fi
 
-                # Sign rh-registry-repo references (always) and registry-access-repo references
-                # (only if signatures for this registry are required)
-                REGISTRY_REFERENCES=("${rh_registry_repo}")
-                if [ "$registry_access_repo" != "" ] && [ "$registry_access_repo" != "null" ] && \
-                   grep -q "^${repository}$" "${SIGN_REGISTRY_ACCESS_FILE}"; then
-                    REGISTRY_REFERENCES+=("${registry_access_repo}")
+                # Determine which registry references to sign based on rh-registry-repo presence
+                # and signExternalRegistries parameter
+                declare -a REGISTRY_REFERENCES=()
+                if [ "$rh_registry_repo" != "" ] && [ "$rh_registry_repo" != "null" ]; then
+                    # Sign rh-registry-repo references (always) and registry-access-repo references
+                    # (only if signatures for this registry are required)
+                    repository="${rh_registry_repo#*/}"
+                    REGISTRY_REFERENCES=("${rh_registry_repo}")
+                    if [ "$registry_access_repo" != "" ] && [ "$registry_access_repo" != "null" ] && \
+                       grep -q "^${repository}$" "${SIGN_REGISTRY_ACCESS_FILE}"; then
+                        REGISTRY_REFERENCES+=("${registry_access_repo}")
+                    fi
+                elif [ "$(params.signExternalRegistries)" = "true" ]; then
+                    # When signExternalRegistries is enabled and no rh-registry-repo is present,
+                    # sign using the repository url directly (for external registries like quay.io)
+                    echo "Signing external registry image: ${INTERNAL_CONTAINER_REF}"
+                    REGISTRY_REFERENCES=("${INTERNAL_CONTAINER_REF}")
+                else
+                    echo "No rh-registry-repo found for repository ${INTERNAL_CONTAINER_REF}, skipping signing"
+                    continue
                 fi
 
                 # Collect data for signing
@@ -350,6 +372,7 @@ spec:
                 done
             done
         done
+        spawn_count=0
         echo "${to_sign[@]}" | python3 -c "
         import sys
         from itertools import zip_longest
@@ -375,20 +398,29 @@ spec:
             while (( ${RUNNING_JOBS@P} > 0 )); do
               wait -n
             done
+            spawn_count=0
             continue
           fi
           INTERNAL_REF=$(echo "$ENTRY" | cut -d' ' -f1)
           PUBLIC_REF=$(echo "$ENTRY" | cut -d' ' -f2)
           DIGEST=$(echo "$ENTRY" | cut -d' ' -f3)
           TAG=$(echo "$ENTRY" | cut -d' ' -f4)
+          # This function is stored in the utils/memory-throttle.sh file
+          # Wait for memory and concurrent limit
+          wait_for_memory 80
           while (( ${RUNNING_JOBS@P} >= $(params.concurrentLimit) )); do
             wait -n
           done
           check_and_sign "${PUBLIC_REF}:${TAG}" "${INTERNAL_REF}" "${DIGEST}" &
+          spawn_count=$((spawn_count + 1))
+
+          # Allow memory usage to stabilize every BURST_SIZE spawns.
+          if (( spawn_count % BURST_SIZE == 0 )); then
+            sleep $STABILIZATION_DELAY
+          fi
         done
-        while (( ${RUNNING_JOBS@P} > 0 )); do
-            wait -n
-        done
+        # Note: The pipe runs the while loop in a subshell, but every group ends with "---"
+        # which waits for all jobs in that group, so no jobs remain when the subshell exits.
         echo "done"
     - name: create-trusted-artifact
       computeResources:

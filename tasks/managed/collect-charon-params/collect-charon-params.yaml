@@ -1,0 +1,200 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: collect-charon-params
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/tags: release
+spec:
+  description: |-
+    Tekton task that collects charon configuration options from the data file. 
+    Charon is a tool to publish maven or npm artifacts of RedHat products the following
+    services:
+    * MRRC(maven.repository.redhat.com), which is used to host maven artifacts
+    * NRRC(npm.registry.redhat.com), which is used to host npm libraries
+    This task looks at the data file in the workspace to extract the params like
+    `charon.*`, `cosignPubKeySecret` and `charonAWSSecret` keys for MRRC/NRRC.
+    `charon.*` will be stored in a charon.env file and are emitted as task results with
+    other three for downstream tasks to use.
+  params:
+    - name: dataJsonPath
+      type: string
+      description: path to data json file
+    - name: snapshotPath
+      description: Path to the JSON string of the Snapshot spec in the data workspace
+      type: string
+    - name: ociStorage
+      description: The OCI repository where the Trusted Artifacts are stored
+      type: string
+      default: "empty"
+    - name: ociArtifactExpiresAfter
+      description: Expiration date for the trusted artifacts created in the
+        OCI repository. An empty string means the artifacts do not expire
+      type: string
+      default: "1d"
+    - name: trustedArtifactsDebug
+      description: Flag to enable debug logging in trusted artifacts. Set to a non-empty string to enable
+      type: string
+      default: ""
+    - name: orasOptions
+      description: oras options to pass to Trusted Artifacts calls
+      type: string
+      default: ""
+    - name: sourceDataArtifact
+      type: string
+      description: Location of trusted artifacts to be used to populate data directory
+      default: ""
+    - name: dataDir
+      description: The location where data will be stored
+      type: string
+      default: /var/workdir/release
+    - name: taskGitUrl
+      type: string
+      description: The url to the git repo where the release-service-catalog tasks and stepactions to be used are stored
+    - name: taskGitRevision
+      type: string
+      description: The revision in the taskGitUrl repo to be used
+    - name: releasePath
+      type: string
+      description: Path to the release data JSON file
+    - name: caTrustConfigMapName
+      type: string
+      description: The name of the ConfigMap to read CA bundle data from
+      default: trusted-ca
+    - name: caTrustConfigMapKey
+      type: string
+      description: The name of the key in the ConfigMap that contains the CA bundle data
+      default: ca-bundle.crt
+  results:
+    - name: charonParamFilePath
+      description: path of the env file for other tasks to consume
+    - name: charonConfigFilePath
+      description: path of the charon config file for other tasks to consume
+    - name: charonAWSSecret
+      description: the secret name for charon aws credential file
+    - name: sourceDataArtifact
+      type: string
+      description: Produced trusted data artifact
+    - name: charonSignCASecret
+      description: the secret name for ca files for radas signing
+  volumes:
+    - name: workdir
+      emptyDir: {}
+    - name: trusted-ca
+      configMap:
+        name: $(params.caTrustConfigMapName)
+        items:
+          - key: $(params.caTrustConfigMapKey)
+            path: ca-bundle.crt
+        optional: true
+  stepTemplate:
+    securityContext:
+      runAsUser: 1001
+    volumeMounts:
+      - mountPath: /var/workdir
+        name: workdir
+      - name: trusted-ca
+        mountPath: /mnt/trusted-ca
+        readOnly: true
+    env:
+      - name: IMAGE_EXPIRES_AFTER
+        value: $(params.ociArtifactExpiresAfter)
+      - name: "ORAS_OPTIONS"
+        value: "$(params.orasOptions)"
+      - name: "DEBUG"
+        value: "$(params.trustedArtifactsDebug)"
+  steps:
+    - name: use-trusted-artifact
+      computeResources:
+        limits:
+          memory: 64Mi
+        requests:
+          memory: 64Mi
+          cpu: 30m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/use-trusted-artifact/use-trusted-artifact.yaml
+      params:
+        - name: workDir
+          value: $(params.dataDir)
+        - name: sourceDataArtifact
+          value: $(params.sourceDataArtifact)
+    - name: collect-charon-params
+      image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
+      computeResources:
+        limits:
+          memory: 128Mi
+        requests:
+          memory: 128Mi
+          cpu: 50m
+      script: |
+        #!/usr/bin/env bash
+        set -eux
+
+        WORK_DIR=$(params.dataDir)
+        cd "$WORK_DIR"
+
+        DATA_FILE="$WORK_DIR/$(params.dataJsonPath)"
+        CHARON_ENV_FILE_PATH="$(dirname "$(params.dataJsonPath)")/charon.env"
+
+        environment="$(jq -re '.charon.environment' "$DATA_FILE")"
+        release="$(jq -re '.charon.release' "$DATA_FILE")"
+        target="$environment-maven-$release"
+        echo "export CHARON_TARGET=$target" >> "$CHARON_ENV_FILE_PATH"
+
+        productName="$(jq -re '.releaseNotes.product_name' "$DATA_FILE")"
+        productVersion="$(jq -re '.releaseNotes.product_version' "$DATA_FILE")"
+        echo "export CHARON_PRODUCT_NAME=\"$productName\"" >> "$CHARON_ENV_FILE_PATH"
+        echo "export CHARON_PRODUCT_VERSION=\"$productVersion\"" >> "$CHARON_ENV_FILE_PATH"
+
+        sign_key="$(jq -re '.charon.signing.signKey' "$DATA_FILE")"
+        echo "export CHARON_SIGN_KEY=\"$sign_key\"" >> "$CHARON_ENV_FILE_PATH"
+
+        SNAPSHOT_PATH="$WORK_DIR/$(params.snapshotPath)"
+        ociRegistries="$(jq -re '[.components[].containerImage] | join("%")' "$SNAPSHOT_PATH")"
+        echo "export CHARON_OCI_REGISTRY=\"$ociRegistries\"" >> "$CHARON_ENV_FILE_PATH"
+
+        awsSecret="$(jq -re '.charon.awsSecret' "$DATA_FILE")"
+        echo -n "$awsSecret" > "$(results.charonAWSSecret.path)"
+
+        sign_ca_secret="$(jq -re '.charon.signing.signCASecret' "$DATA_FILE")"
+        echo -n "$sign_ca_secret" > "$(results.charonSignCASecret.path)"
+
+        AUTHOR=$(jq -re '.status.attribution.author' "$WORK_DIR/$(params.releasePath)")
+        echo "export CHARON_AUTHOR=\"$AUTHOR\"" >> "$CHARON_ENV_FILE_PATH"
+
+        echo -n "$CHARON_ENV_FILE_PATH" > "$(results.charonParamFilePath.path)"
+
+        CHARON_CFG_FILE_PATH="$(dirname "$(params.dataJsonPath)")/charon-config.yaml"
+        jq -re '.charon.config' "$DATA_FILE" > "$CHARON_CFG_FILE_PATH"
+        echo -n "$CHARON_CFG_FILE_PATH" > "$(results.charonConfigFilePath.path)"
+    - name: create-trusted-artifact
+      computeResources:
+        limits:
+          memory: 128Mi
+        requests:
+          memory: 128Mi
+          cpu: 250m
+      ref:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: stepactions/create-trusted-artifact/create-trusted-artifact.yaml
+      params:
+        - name: ociStorage
+          value: $(params.ociStorage)
+        - name: workDir
+          value: $(params.dataDir)
+        - name: sourceDataArtifact
+          value: $(results.sourceDataArtifact.path)

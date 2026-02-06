@@ -1,0 +1,32 @@
+# Qodo PR-Agent configuration
+# Add only the settings you need.
+# Docs: https://docs.qodo.ai/qodo-documentation/qodo-merge/configuration/configuration-file
+
+[github_app]
+# Ignore PRs opened by these authors.
+ignore_pr_authors = ["red-hat-konflux", "release-service-bot"]
+# Disable auto-run on PR open/reopen - only run when user explicitly comments /review
+pr_commands = []
+# Disable auto-run on push - only run when user explicitly comments /review
+handle_push_trigger = false
+
+[pr_reviewer]
+# Limit review feedback to 3 findings per PR.
+num_max_findings = 3
+# Prefer inline comments rather than a single persistent summary comment.
+persistent_comment = false
+# Reinforce "3 inline comments" behavior.
+extra_instructions = """
+- Provide up to 3 inline review comments per PR.
+- Prefer inline suggestions over a single summary comment.
+"""
+
+[pr_code_suggestions]
+# Enable inline, committable suggestions.
+commitable_code_suggestions = true
+# Limit inline suggestions to 3 per PR.
+num_code_suggestions_per_chunk = 3
+extra_instructions = """
+- Before suggesting a change, verify whether the PR/task already includes it (or equivalent logic). If it already exists, do not suggest it.
+- Do not repeat previously rejected suggestions in subsequent updates of the same PR if the thread was resolved without action.
+"""

@@ -139,7 +139,7 @@ spec:
         - name: sourceDataArtifact
           value: $(params.sourceDataArtifact)
     - name: apply-mapping
-      image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+      image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
       computeResources:
         limits:
           memory: 64Mi
@@ -187,14 +187,17 @@ spec:
             # Remove `{{ incrementer }}` placeholder to get the version prefix for regex pattern
             # shellcheck disable=SC2001
             version_prefix=$(echo "${tag_template}" | sed 's/{{ incrementer }}//g')
-            tag_pattern="^${version_prefix}[0-9]+$"  # Build regex pattern dynamically
+            # Match tags with 1–6 digit increments only. Ignore 7+ digit tags to avoid
+            # treating short commit SHAs as incrementer values
+            tag_pattern="^${version_prefix}[0-9]{1,6}$"
 
             # Extract the numeric part of existing tags and find the max increment
             max_increment=$(echo "${existing_tags}" | { grep -E "${tag_pattern}" || true; } \
             | sed -E "s/${version_prefix}//" | sort -nr | head -n1)
 
             # Calculate the next increment (default to 1 if max_increment is empty or unset)
-            increment=$((max_increment + 1))
+            # Use 10# to force decimal input preventing leading 0 from being treated as octal
+            increment=$((10#${max_increment:-0} + 1))
 
             # Substitute `{{ incrementer }}` in the tag template with the calculated increment
             tag="${tag_template//\{\{ incrementer \}\}/${increment}}"
@@ -464,6 +467,13 @@ spec:
                <<< "$labels" > "$labels_file"
               jq --argjson i "$i" --slurpfile labels "$labels_file" \
                 '.components[$i].metadata = (.components[$i].metadata // {}) * {labels: $labels[0]}' \
+                "${SNAPSHOT_SPEC_FILE}" > /tmp/temp && mv /tmp/temp "${SNAPSHOT_SPEC_FILE}"
+            fi
+
+            # Add media type to component
+            if [ -n "$config_media_type" ]; then
+              jq --argjson i "$i" --arg media_type "$config_media_type" \
+                '.components[$i].metadata = (.components[$i].metadata // {}) * {media_type: $media_type}' \
                 "${SNAPSHOT_SPEC_FILE}" > /tmp/temp && mv /tmp/temp "${SNAPSHOT_SPEC_FILE}"
             fi
 

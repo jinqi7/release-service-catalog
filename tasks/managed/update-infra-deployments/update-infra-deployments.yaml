@@ -134,7 +134,7 @@ spec:
         - name: sourceDataArtifact
           value: $(params.sourceDataArtifact)
     - name: git-clone-infra-deployments
-      image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+      image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
       computeResources:
         limits:
           memory: 256Mi
@@ -151,7 +151,7 @@ spec:
         echo "Cloning $TARGET_GH_REPO"
         git clone "https://github.com/${TARGET_GH_REPO}.git" cloned
     - name: run-update-script
-      image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+      image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
       computeResources:
         limits:
           memory: 128Mi
@@ -196,7 +196,7 @@ spec:
         echo "$PATCHED_SCRIPT"
         echo "$PATCHED_SCRIPT" | sh
     - name: get-diff-files
-      image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+      image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
       computeResources:
         limits:
           memory: 128Mi
@@ -212,7 +212,7 @@ spec:
         git status -s --porcelain | cut -c4- > ../updated_files.txt
     # Based on https://github.com/tektoncd/catalog/tree/main/task/github-app-token/0.2/
     - name: create-pr
-      image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+      image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
       computeResources:
         limits:
           memory: 512Mi
@@ -291,10 +291,11 @@ spec:
                 now = int(time.time())
 
                 header_ = {"typ": "JWT", "alg": "RS256"}
-                header = base64.b64encode(json.dumps(header_).encode())
+                # JWT requires base64url encoding without padding
+                header = base64.urlsafe_b64encode(json.dumps(header_).encode()).rstrip(b'=')
 
                 payload_ = {"iat": now, "exp": now + expire_in, "iss": self.app_id}
-                payload = base64.b64encode(json.dumps(payload_).encode())
+                payload = base64.urlsafe_b64encode(json.dumps(payload_).encode()).rstrip(b'=')
 
                 header_payload = header + b"." + payload
                 proc = subprocess.run(
@@ -303,7 +304,7 @@ spec:
                     check=True,
                     stdout=subprocess.PIPE,
                 )
-                signature = base64.b64encode(proc.stdout)
+                signature = base64.urlsafe_b64encode(proc.stdout).rstrip(b'=')
 
                 token = header_payload + b"." + signature
                 return token.decode()

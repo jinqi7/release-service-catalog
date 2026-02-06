@@ -80,6 +80,9 @@ spec:
     - name: sourceDataArtifact
       type: string
       description: Produced trusted data artifact
+    - name: checksum_map
+      type: string
+      description: OCI artifact reference for checksum map returned from internal push-artifacts-to-cdn
   volumes:
     - name: workdir
       emptyDir: {}
@@ -129,7 +132,7 @@ spec:
         - name: sourceDataArtifact
           value: $(params.sourceDataArtifact)
     - name: run-script
-      image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+      image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
       computeResources:
         limits:
           memory: 512Mi
@@ -200,14 +203,15 @@ spec:
           exodusGwEnv="pre"
           pulpSecret="rhsm-pulp-stage-secret"
           udcacheSecret="udcache-stage-secret"
-          cgwHostname="https://developers.redhat.com/content-gateway/rest/admin"
-          cgwSecret="cgw-service-account-prod-secret"
+          # CGW 'stage' env is 'qa' as of now, hence the confusing 'stage' in secret name and 'qa' in url
+          cgwHostname="https://developers.qa.redhat.com/content-gateway/rest/admin"
+          cgwSecret="cgw-service-account-stage-secret"
         elif [ "${env}" = "qa" ]; then
           exodusGwSecret="exodus-stage-secret"
           exodusGwEnv="live"
           pulpSecret="rhsm-pulp-qa-secret"
           udcacheSecret="udcache-qa-secret"
-          cgwHostname="https://developers.stage.redhat.com/content-gateway/rest/admin"
+          cgwHostname="https://developers.qa.redhat.com/content-gateway/rest/admin"
           cgwSecret="cgw-service-account-stage-secret"
         else
           echo "cdn.env in the data file must be one of [production, stage, qa]."
@@ -248,6 +252,8 @@ spec:
         fi
 
         results=$(kubectl get internalrequest "${NAME}" -o=jsonpath='{.status.results}')
+        checksum_map=$(echo "${results}" | jq -r '.checksum_map // empty')
+        echo -n "${checksum_map}" > "$(results.checksum_map.path)"
         if [ "$(echo "${results}" | jq -r '.result')" == "Success" ]; then
           echo "Artifacts pushed"
           echo "${results}" | jq '.'

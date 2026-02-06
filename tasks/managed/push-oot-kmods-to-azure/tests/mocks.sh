@@ -45,12 +45,16 @@ function az() {
                     fi
 
                     COUNT_FILE="/var/workdir/upload_count.txt"
+                    UPLOAD_LOG="/var/workdir/upload_paths.log"
                     if [ ! -f "$COUNT_FILE" ]; then
                         echo 0 > "$COUNT_FILE"
                     fi
                     COUNT=$(cat "$COUNT_FILE")
 
                     echo "Mock az storage blob upload called (count=$COUNT) with: $*"
+
+                    # Log the upload path for verification
+                    echo "$*" >> "$UPLOAD_LOG"
 
                     # For multiarch, expect different upload patterns
                     # Check if this looks like a multiarch upload by looking for arch paths
@@ -65,16 +69,14 @@ function az() {
                         fi
                     else
                         # Single arch mode - now expects arch suffix (x86_64)
-                        if [ "$COUNT" -eq 0 ]; then
-                            if [[ ! "$*" == *"--name mocked-vendor-azure/1.2.3-az/6.5.0-az/x86_64/mod1.ko"* ]]; then
-                                echo "ERROR: First az blob upload call has wrong name param for mod1.ko"
-                                echo "Expected: --name mocked-vendor-azure/1.2.3-az/6.5.0-az/x86_64/mod1.ko"
-                                return 1
-                            fi
-                        elif [ "$COUNT" -eq 1 ]; then
-                             if [[ ! "$*" == *"--name mocked-vendor-azure/1.2.3-az/6.5.0-az/x86_64/mod2.ko"* ]]; then
-                                echo "ERROR: Second az blob upload call has wrong name param for mod2.ko"
-                                echo "Expected: --name mocked-vendor-azure/1.2.3-az/6.5.0-az/x86_64/mod2.ko"
+                        if [ "$COUNT" -le 1 ]; then
+                            # First two uploads should be .ko files (mod1.ko or mod2.ko, order doesn't matter)
+                            if [[ "$*" == *"--name mocked-vendor-azure/1.2.3-az/6.5.0-az/x86_64/mod1.ko"* ]] || [[ "$*" == *"--name mocked-vendor-azure/1.2.3-az/6.5.0-az/x86_64/mod2.ko"* ]]; then
+                                echo "Valid .ko file upload detected (upload #$COUNT)"
+                            else
+                                echo "ERROR: Upload #$COUNT should be mod1.ko or mod2.ko"
+                                echo "Expected: --name mocked-vendor-azure/1.2.3-az/6.5.0-az/x86_64/mod[12].ko"
+                                echo "Got: $*"
                                 return 1
                             fi
                         elif [ "$COUNT" -eq 2 ]; then
@@ -131,5 +133,24 @@ check_upload_count() {
     else
         echo "ERROR: az blob upload was called $COUNT times, expected 4 (single arch) or 5+ (multiarch)"
         return 1
+    fi
+
+    # Verify kernel version cleaning: the test uses KERNEL_VERSION="6.5.0-az.x86_64"
+    # The task should strip the .x86_64 suffix, so upload paths should contain "6.5.0-az/" not "6.5.0-az.x86_64/"
+    UPLOAD_LOG="/var/workdir/upload_paths.log"
+    if [ -f "$UPLOAD_LOG" ]; then
+        echo ""
+        echo "Verifying KERNEL_VERSION architecture suffix was stripped..."
+        # Use grep -F for literal/fixed string matching (dots are literal, not regex)
+        if grep -F -q "6.5.0-az.x86_64" "$UPLOAD_LOG"; then
+            echo "ERROR: Found dirty kernel version (6.5.0-az.x86_64) in upload paths!"
+            echo "The .x86_64 suffix should have been stripped."
+            echo "Upload log:"
+            cat "$UPLOAD_LOG"
+            return 1
+        else
+            echo "SUCCESS: Kernel version architecture suffix was properly stripped"
+            echo "All uploads used cleaned path: 6.5.0-az (not 6.5.0-az.x86_64)"
+        fi
     fi
 }

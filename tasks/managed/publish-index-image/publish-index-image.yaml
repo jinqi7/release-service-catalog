@@ -125,7 +125,7 @@ spec:
           value: $(params.sourceDataArtifact)
     - name: publish-index-image
       image: >-
-        quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+        quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
       computeResources:
         limits:
           memory: 512Mi
@@ -151,8 +151,13 @@ spec:
           targetIndex=$(jq -r --argjson i "$i" \
             '.components[$i].target_index' "$(params.dataDir)/$(params.internalRequestResultsFile)")
 
-          sourceIndex=$(jq -r  --argjson i "$i" \
-            '.components[$i].index_image' "$(params.dataDir)/$(params.internalRequestResultsFile)")
+          sourceIndex=("$(jq -r  --argjson i "$i" \
+            '.components[$i].index_image' "$(params.dataDir)/$(params.internalRequestResultsFile)")")
+
+          # we need the resolved index_image as the published pub index might be replaced by another process,
+          # causing pyxis to fail, so we need to publish the resolved as the timestamped one.
+          sourceIndex+=("$(jq -r  --argjson i "$i" \
+            '.components[$i].index_image_resolved' "$(params.dataDir)/$(params.internalRequestResultsFile)")")
 
           buildTimestamp=$(jq -r --argjson i "$i" '.components[$i].completion_time' \
             "$(params.dataDir)/$(params.internalRequestResultsFile)")
@@ -171,11 +176,11 @@ spec:
           for((x=0; x<${#publishingImages[@]}; x++ )); do
               echo "=== Creating internal request to publish image:"
               echo ""
-              echo "- from: ${sourceIndex}"
+              echo "- from: ${sourceIndex[$x]}"
               echo "- to: ${publishingImages[$x]}"
 
               internal-request --pipeline "${request}" \
-                  -p sourceIndex="${sourceIndex}" \
+                  -p sourceIndex="${sourceIndex[$x]}" \
                   -p targetIndex="${publishingImages[$x]}" \
                   -p publishingCredentials="${credentials}" \
                   -p retries="$(params.retries)" \

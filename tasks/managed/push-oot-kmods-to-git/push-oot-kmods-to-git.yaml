@@ -5,15 +5,11 @@ metadata:
   name: push-oot-kmods-to-git
 spec:
   description: >-
-    Task to upload out-of-tree kernel modules and optionally RPMs to a private vendor git repo
+    Task to upload out-of-tree kernel modules to a private vendor git repo
   params:
     - name: signedKmodsPath
       type: string
       description: Path where the kernel modules are stored relative to the dataDir
-    - name: rpmPath
-      type: string
-      description: Path where the RPM packages are stored relative to the dataDir (optional)
-      default: ""
     - name: dataDir
       type: string
       description: The absolute path to the working directory
@@ -86,7 +82,7 @@ spec:
         - name: sourceDataArtifact
           value: $(params.sourceDataArtifact)
     - name: push-to-git
-      image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+      image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
       computeResources:
         limits:
           memory: 1Gi
@@ -103,7 +99,6 @@ spec:
 
         PUSH_TOKEN=$(cat /var/secrets/git-token/gitlab-gr-maintenance-token)
         SIGNED_KMODS_PATH="$(params.dataDir)/$(params.signedKmodsPath)"
-        RPM_FULL_PATH="$(params.dataDir)/$(params.rpmPath)"
         REPO_URL="$(params.gitRepoUrl)"
         GIT_WORK_DIR="$(params.dataDir)/git-work"
 
@@ -139,12 +134,9 @@ spec:
             local arch_name="$1"
             local source_dir="$2"
 
-            # Always include architecture suffix for consistent hierarchy
-            local arch_suffix="/${arch_name}"
+            echo "Processing artifacts for architecture directory: $arch_name"
 
-            echo "Processing artifacts for architecture: $arch_name"
-
-            # Read envfile to get version information
+            # Read envfile to get version information and ARCH override
             if [ -f "$source_dir/envfile" ]; then
                 # shellcheck source=/dev/null
                 . "$source_dir/envfile"
@@ -153,17 +145,54 @@ spec:
                 return 1
             fi
 
-            TARGET_DIR="${DRIVER_VENDOR}/${DRIVER_VERSION}/${KERNEL_VERSION}${arch_suffix}"
-            echo "Target directory for $arch_name: $TARGET_DIR"
+            # Strip architecture suffix from KERNEL_VERSION (e.g., .aarch64+64k, .x86_64)
+            KERNEL_VERSION_CLEAN=$(echo "$KERNEL_VERSION" | \
+              sed -E 's/\.(x86_64|amd64|aarch64|arm64|ppc64le|s390x)(\+.*)?$//')
+            echo "Original KERNEL_VERSION: $KERNEL_VERSION"
+            echo "Cleaned KERNEL_VERSION: $KERNEL_VERSION_CLEAN"
+
+            # Use ARCH from envfile if available and not MULTI_PLATFORM, otherwise fall back to directory name
+            if [ -n "${ARCH:-}" ] && [ "$ARCH" != "MULTI_PLATFORM" ]; then
+                local final_arch="$ARCH"
+                echo "Using architecture: $final_arch (from envfile ARCH variable)"
+            else
+                local final_arch="$arch_name"
+                if [ "${ARCH:-}" = "MULTI_PLATFORM" ]; then
+                    echo "Using architecture: $final_arch (ARCH=MULTI_PLATFORM, using directory name)"
+                else
+                    echo "Using architecture: $final_arch (from directory name)"
+                fi
+            fi
+            local arch_suffix="/${final_arch}"
+
+            TARGET_DIR="${DRIVER_VENDOR}/${DRIVER_VERSION}/${KERNEL_VERSION_CLEAN}${arch_suffix}"
+            echo "Target directory: $TARGET_DIR"
 
             git sparse-checkout add "$TARGET_DIR"
             git checkout
             mkdir -p "$TARGET_DIR"
 
-            # Copy .ko files
-            if ls "$source_dir"/*.ko 1> /dev/null 2>&1; then
-                cp "$source_dir"/*.ko "$TARGET_DIR/"
-                echo "Copied .ko files for $arch_name"
+            # Copy .ko files (preserving directory structure)
+            if find "$source_dir" -name "*.ko" -type f | head -1 | grep -q "."; then
+                echo "Copying .ko files with preserved directory structure for $arch_name..."
+
+                # Copy entire directory structure containing .ko files
+                cd "$source_dir"
+                find . -name "*.ko" -type f | while read -r ko_file; do
+                    ko_dir=$(dirname "$ko_file")
+                    mkdir -p "$TARGET_DIR/$ko_dir"
+                    cp "$ko_file" "$TARGET_DIR/$ko_file"
+                done
+                cd - > /dev/null
+                ko_file_count=$(find "$TARGET_DIR" -name "*.ko" -type f | wc -l)
+                echo "Copied $ko_file_count .ko files for $arch_name (preserving directory structure)"
+
+                # Show directory structure for verification
+                echo "Directory structure copied for $arch_name:"
+                find "$TARGET_DIR" -name "*.ko" -type f | sort | head -10 | sed 's|^|  |'
+                if [ "$(find "$TARGET_DIR" -name "*.ko" -type f | wc -l)" -gt 10 ]; then
+                    echo "  ... (showing first 10 files)"
+                fi
             else
                 echo "WARNING: No .ko files found for $arch_name"
                 return 1
@@ -179,20 +208,6 @@ spec:
             if [ -f "$source_dir/envfile" ]; then
                 cp "$source_dir/envfile" "$TARGET_DIR/"
                 echo "Copied envfile for $arch_name"
-            fi
-
-            # Copy RPM files if available (architecture-specific RPMs would be in arch-specific directories)
-            if [ -n "$(params.rpmPath)" ] && [ -d "${RPM_FULL_PATH}" ]; then
-                # Look for architecture-specific RPMs or general RPMs
-                rpm_source_dir="${RPM_FULL_PATH}"
-                if [ "$arch_count" -gt 1 ] && [ -d "${RPM_FULL_PATH}/${arch_name}" ]; then
-                    rpm_source_dir="${RPM_FULL_PATH}/${arch_name}"
-                fi
-
-                if [ -n "$(find "${rpm_source_dir}" -maxdepth 1 -name '*.rpm' -print -quit 2>/dev/null)" ]; then
-                    cp "${rpm_source_dir}"/*.rpm "$TARGET_DIR/"
-                    echo "Copied RPM files for $arch_name"
-                fi
             fi
 
             # Add files to git
@@ -233,7 +248,10 @@ spec:
                 if [ -n "$first_arch_dir" ] && [ -f "$first_arch_dir/envfile" ]; then
                     # shellcheck source=/dev/null
                     . "$first_arch_dir/envfile"
-                    summary_target_dir="${DRIVER_VENDOR}/${DRIVER_VERSION}/${KERNEL_VERSION}/multi-arch-summary"
+                    # Strip architecture suffix from KERNEL_VERSION
+                    KERNEL_VERSION_CLEAN=$(echo "$KERNEL_VERSION" | \
+                      sed -E 's/\.(x86_64|amd64|aarch64|arm64|ppc64le|s390x)(\+.*)?$//')
+                    summary_target_dir="${DRIVER_VENDOR}/${DRIVER_VERSION}/${KERNEL_VERSION_CLEAN}/multi-arch-summary"
 
                     echo "Creating multi-architecture summary in Git: ${summary_target_dir}"
                     git sparse-checkout add "$summary_target_dir"

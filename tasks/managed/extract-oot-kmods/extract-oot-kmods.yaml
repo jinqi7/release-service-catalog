@@ -116,7 +116,7 @@ spec:
         - name: sourceDataArtifact
           value: $(params.sourceDataArtifact)
     - name: detect-architectures
-      image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+      image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
       computeResources:
         limits:
           memory: 256Mi
@@ -150,7 +150,7 @@ spec:
             echo "  Architecture: $platform_arch, Digest: $arch_digest"
         done
     - name: extract-kmods
-      image: quay.io/konflux-ci/release-service-utils@sha256:2f9e6863e82bbc9ddce5a290f3fd0e87657c475e3de8a832b2ef7f8d0671e7d3
+      image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
       computeResources:
         limits:
           memory: 1Gi
@@ -191,17 +191,45 @@ spec:
 
             for LAYER in $(jq -r '.layers[].digest' "$tmp_dir/manifest.json"); do
                 LAYER=${LAYER#sha256:}
-                # Check if the archive contains the KMODS_PATH directory
-                if tar -tf "$tmp_dir/$LAYER" | grep -q "^${KMODS_PATH#/}/"; then
+                # Check if the archive contains the KMODS_PATH directory or .ko files within it
+                if tar -tf "$tmp_dir/$LAYER" | grep -E "^${KMODS_PATH#/}.*\.ko$" > /dev/null 2>&1; then
                     echo "Extracting $KMODS_PATH/ from $LAYER for $arch_name..."
                     tar -xf "$tmp_dir/$LAYER" -C "$tmp_dir" "${KMODS_PATH#/}" --no-same-owner
 
                     mkdir -p "$dest_dir"
-                    if ls "$tmp_dir$KMODS_PATH"/*.ko 1> /dev/null 2>&1; then
-                        cp -r "$tmp_dir$KMODS_PATH"/*.ko "$dest_dir/"
-                        extracted=true
-                        ko_count=$(find "$dest_dir" -name "*.ko" -type f | wc -l)
-                        echo "Extracted .ko files for $arch_name: $ko_count files"
+
+                    # Check if KMODS_PATH directory exists and extract recursively
+                    if [ -d "$tmp_dir$KMODS_PATH" ]; then
+                        cd "$tmp_dir$KMODS_PATH"
+
+                        # Find all .ko files recursively and preserve directory structure
+                        if find . -name "*.ko" -type f | head -1 | grep -q "."; then
+                            echo "Found .ko files in directory structure, extracting recursively..."
+
+                            # Copy entire directory structure containing .ko files
+                            find . -name "*.ko" -type f | while read -r ko_file; do
+                                ko_dir=$(dirname "$ko_file")
+                                mkdir -p "$dest_dir/$ko_dir"
+                                cp "$ko_file" "$dest_dir/$ko_file"
+                                echo "  Copied: $ko_file"
+                            done
+
+                            extracted=true
+                            ko_count=$(find "$dest_dir" -name "*.ko" -type f | wc -l)
+                            echo "Extracted .ko files for $arch_name: $ko_count files (recursive)"
+
+                            # List the directory structure for verification
+                            echo "Directory structure preserved:"
+                            find "$dest_dir" -name "*.ko" -type f | sort | head -20
+                            if [ "$(find "$dest_dir" -name "*.ko" -type f | wc -l)" -gt 20 ]; then
+                                echo "  ... (showing first 20 files)"
+                            fi
+                        else
+                            echo "No .ko files found in $KMODS_PATH directory structure"
+                        fi
+                        cd - > /dev/null
+                    else
+                        echo "$KMODS_PATH directory not found in layer"
                     fi
 
                     echo "Copying envfile to get versions data for $arch_name..."
@@ -228,34 +256,90 @@ spec:
             fi
         }
 
+        # Function to get final architecture name from envfile
+        get_final_arch_name() {
+            (
+                local temp_dir="$1"
+                local platform_arch="$2"
+
+                if [ -f "$temp_dir/envfile" ]; then
+                    # shellcheck source=/dev/null
+                    . "$temp_dir/envfile"
+                    if [ -n "${ARCH:-}" ] && [ "$ARCH" != "MULTI_PLATFORM" ]; then
+                        echo "Using ARCH=$ARCH from envfile (platform: $platform_arch)" >&2
+                        echo "$ARCH"
+                        return
+                    elif [ "${ARCH:-}" = "MULTI_PLATFORM" ]; then
+                        echo "ARCH=MULTI_PLATFORM in envfile, using platform architecture: $platform_arch" >&2
+                    fi
+                fi
+
+                if [ -z "${ARCH:-}" ]; then
+                    echo "No ARCH variable in envfile, using platform architecture: $platform_arch" >&2
+                else
+                    echo "Using platform architecture: $platform_arch" >&2
+                fi
+                echo "$platform_arch"
+            )
+        }
+
         if [ "$arch_count" -eq 1 ]; then
             echo "Single architecture image, using standard extraction"
             # Extract the actual architecture name
-            actual_arch=$(jq -r '.platform.architecture' "$(params.dataDir)/architectures.json")
-            echo "Architecture: $actual_arch"
-            extract_single_arch "$source_image" "$(params.dataDir)/$SIGNED_KMODS_PATH/$actual_arch" "$actual_arch"
+            platform_arch=$(jq -r '.platform.architecture' "$(params.dataDir)/architectures.json")
+            echo "Platform architecture: $platform_arch"
+
+            # Extract to temporary directory first
+            temp_dir="$(params.dataDir)/$SIGNED_KMODS_PATH/${platform_arch}"
+            extract_single_arch "$source_image" "$temp_dir" "$platform_arch"
+
+            # Get final architecture name from envfile
+            final_arch=$(get_final_arch_name "$temp_dir" "$platform_arch")
+
+            # Rename directory if ARCH differs from platform architecture
+            if [ "$final_arch" != "$platform_arch" ]; then
+                final_dir="$(params.dataDir)/$SIGNED_KMODS_PATH/${final_arch}"
+                echo "Renaming directory from $platform_arch to $final_arch"
+                mv "$temp_dir" "$final_dir"
+            fi
+
+            echo "Final architecture: $final_arch"
         else
             echo "Multi-architecture image detected, processing each architecture separately"
 
             # Read architecture data and process each one
             arch_data=$(cat "$(params.dataDir)/architectures.json")
 
-            echo "$arch_data" | jq -c '.' | while IFS= read -r arch_info; do
+            # Process architectures using a while loop with process substitution
+            # to avoid subshell issues with pipes
+            while IFS= read -r arch_info; do
                 platform_arch=$(echo "$arch_info" | jq -r '.platform.architecture')
                 arch_digest=$(echo "$arch_info" | jq -r '.digest')
 
-                echo "Processing architecture: $platform_arch (digest: $arch_digest)"
+                echo "Processing platform architecture: $platform_arch (digest: $arch_digest)"
 
-                # Create architecture-specific directory
-                arch_dir="$(params.dataDir)/$SIGNED_KMODS_PATH/$platform_arch"
+                # Extract to temporary directory first
+                temp_dir="$(params.dataDir)/$SIGNED_KMODS_PATH/${platform_arch}"
 
                 # Extract for this specific architecture using manifest digest
                 # Extract the registry and repository from source_image (remove existing digest)
                 source_base=$(echo "$source_image" | cut -d'@' -f1)
                 arch_specific_image="$source_base@$arch_digest"
                 echo "Using architecture-specific image: $arch_specific_image"
-                extract_single_arch "$arch_specific_image" "$arch_dir" "$platform_arch"
-            done
+                extract_single_arch "$arch_specific_image" "$temp_dir" "$platform_arch"
+
+                # Get final architecture name from envfile
+                final_arch=$(get_final_arch_name "$temp_dir" "$platform_arch")
+
+                # Rename directory if ARCH differs from platform architecture
+                if [ "$final_arch" != "$platform_arch" ]; then
+                    final_dir="$(params.dataDir)/$SIGNED_KMODS_PATH/${final_arch}"
+                    echo "Renaming directory from $platform_arch to $final_arch"
+                    mv "$temp_dir" "$final_dir"
+                fi
+
+                echo "Final architecture: $final_arch"
+            done < <(echo "$arch_data" | jq -c '.')
 
             # Create a summary of what was extracted
             summary_file="$(params.dataDir)/$SIGNED_KMODS_PATH/extraction_summary.txt"
