@@ -198,7 +198,7 @@ function oras() {
 function pulp_push_wrapper() {
     echo Mock pulp_push_wrapper called with: $*
 
-    if [[ "$*" != *"--pulp-url https://pulp.com"* ]]; then
+    if [[ "$*" != *"--pulp-url https://SENSITIVE_DATA_pulp.com"* ]]; then
         printf "Mocked failure of pulp_push_wrapper" > /nonexistent/location
     fi
 
