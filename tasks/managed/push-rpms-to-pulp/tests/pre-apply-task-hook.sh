@@ -10,9 +10,10 @@ yq -i '.spec.steps[1].script = load_str("'$SCRIPT_DIR'/mocks.sh") + .spec.steps[
 
 # Create a dummy pulp secret (and delete it first if it exists)
 kubectl delete secret pulp-task-pulp-secret --ignore-not-found
+
 kubectl create secret generic pulp-task-pulp-secret --from-literal=cli.toml='base_url = "https://console.redhat.com"
 client_id = "mock-client-id"
-client_secret = "mock-client-secret"
+client_secret = "THIS_SHOULD_NOT_BE_EXPOSED"
 '
 
 # Create a dummy pulp secret for basic auth (and delete it first if it exists)
@@ -24,4 +25,4 @@ password = "mock-password"
 
 # Create a dummy pulp secret (and delete it first if it exists)
 kubectl delete secret pulp-task-pulp-secret-missing --ignore-not-found
-kubectl create secret generic pulp-task-pulp-secret-missing --from-literal=dummy=abcdef123
+kubectl create secret generic pulp-task-pulp-secret-missing --from-literal=dummy=THIS_SHOULD_NOT_BE_EXPOSED 

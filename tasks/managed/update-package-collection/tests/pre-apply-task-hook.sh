@@ -12,9 +12,9 @@ kubectl delete secret package-collection-secret --ignore-not-found
 
 # Create the fake secrets for koji
 kubectl create secret generic push-koji-test \
-  --from-literal=base64_keytab="$(base64 <<< "some keytab")"
+  --from-literal=base64_keytab="$(base64 <<< "THIS_SHOULD_NOT_BE_EXPOSED")"
 
-kubectl create secret generic package-collection-secret --from-literal=gitlab-access-token=gitlab-access-token \
+kubectl create secret generic package-collection-secret --from-literal=gitlab-access-token=THIS_SHOULD_NOT_BE_EXPOSED  \
   --from-literal=gitlab_host=gitlab_host --from-literal=git_author_name=git_author_name \
   --from-literal=git_author_email=git_author_email --from-literal=git_repo="package-collection-utils"
 

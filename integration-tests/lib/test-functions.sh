@@ -285,9 +285,6 @@ resolve_symlinks_for_kustomize() {
 # Relies on global variables: SUITE_DIR
 create_kubernetes_resources() {
     echo "Creating Kubernetes resources..."
-    # tmpDir is made global by not declaring it local
-    tmpDir=$(mktemp -d)
-    echo "Temporary directory for resources: ${tmpDir}"
 
     # Resolve symlinks in resources directories for kustomize compatibility
     # This allows tests to use symlinks to share resources while maintaining

@@ -1,0 +1,350 @@
+---
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: ReleasePlanAdmission
+metadata:
+  name: ${release_plan_admission_name}
+  labels:
+    originating-tool: "${originating_tool}"
+spec:
+  applications:
+    - ${application_name}
+  data:
+    atlas:
+      server: stage
+      atlas-sso-secret-name: atlas-staging-sso-secret-${component_name}
+      atlas-retry-aws-secret-name: atlas-retry-s3-staging-secret-${component_name}
+    pyxis:
+      server: stage
+      secret: pyxis-${component_name}
+    sign:
+      configMapName: "hacbs-signing-pipeline-config-staging-e2e"
+      cosignSecretName: "konflux-cosign-signing-stage-${component_name}"
+    mapping:
+      defaults:
+        tags:
+          - latest
+        pushSourceContainer: true
+      components:
+        - name: ${component_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component2_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component3_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component4_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component5_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component6_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component7_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component8_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component9_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component10_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component11_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component12_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component13_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component14_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component15_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component16_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component17_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component18_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component19_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component20_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component21_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component22_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component23_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component24_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component25_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component26_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component27_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component28_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component29_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component30_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component31_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component32_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component33_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component34_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component35_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component36_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component37_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component38_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component39_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component40_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component41_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component42_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component43_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component44_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component45_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component46_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component47_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component48_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component49_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component50_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component51_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component52_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component53_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component54_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component55_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component56_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component57_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component58_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component59_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component60_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component61_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component62_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component63_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component64_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component65_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component66_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component67_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component68_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component69_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component70_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component71_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component72_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component73_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component74_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component75_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component76_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component77_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component78_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component79_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component80_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component81_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component82_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component83_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component84_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component85_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component86_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component87_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component88_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component89_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component90_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component91_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component92_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component93_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component94_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component95_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component96_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component97_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component98_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component99_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component100_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component101_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component102_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component103_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component104_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component105_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component106_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component107_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component108_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component109_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component110_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component111_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component112_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component113_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component114_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component115_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component116_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component117_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component118_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component119_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component120_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component121_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component122_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component123_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component124_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component125_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component126_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component127_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component128_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component129_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component130_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component131_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component132_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component133_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component134_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component135_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component136_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component137_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component138_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component139_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component140_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component141_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component142_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component143_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component144_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component145_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component146_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component147_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component148_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component149_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+        - name: ${component150_name}
+          repository: quay.io/redhat-pending/rhtap----rh-advisories-component
+    releaseNotes:
+      product_id:
+        - 999
+      product_name: Red Hat Comp2
+      product_version: '1.0.1'
+      cpe: 'cpe:/a:redhat:comp2:1::appstream'
+      product_stream: comp2-1.0
+  origin: ${tenant_namespace}
+  pipeline:
+    pipelineRef:
+      params:
+        - name: url
+          value: "${RELEASE_CATALOG_GIT_URL}"
+        - name: revision
+          value: "${RELEASE_CATALOG_GIT_REVISION}"
+        - name: pathInRepo
+          value: pipelines/managed/rh-advisories/rh-advisories.yaml
+      resolver: git
+    serviceAccountName: ${managed_sa_name}
+    timeouts:
+      pipeline: 6h0m0s
+      tasks: 6h0m0s
+  policy: standard-${component_name}
