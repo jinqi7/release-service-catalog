@@ -84,7 +84,6 @@ spec:
       computeResources:
         limits:
           memory: 512Mi
-          cpu: 250m
         requests:
           memory: 512Mi
           cpu: 250m
@@ -134,10 +133,12 @@ spec:
         echo -e "=== UPDATING ${REPO} ON BRANCH ${REVISION} ===\n"
 
         cd "${TEMP}"
+        set +x
         git_clone_and_checkout --repository "${REPO}" --revision "${REVISION}"
 
         # updating local branch with the upstream
         git_rebase -n "glab-base" -r "${UPSTREAM_REPO}" -v "${REVISION}"
+        set -x
 
         replacementsUpdateError=
         # getting the files that have replacements
