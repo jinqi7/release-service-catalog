@@ -1,0 +1,100 @@
+---
+apiVersion: tekton.dev/v1
+kind: TaskRun
+metadata:
+  name: test-stepaction-ca-cert
+spec:
+  taskSpec:
+    params:
+      - name: caCertPath
+        type: string
+        default: /mnt/trusted-ca/ca-bundle.crt
+    volumes:
+      - name: trusted-ca
+        configMap:
+          name: test-trusted-ca
+          items:
+            - key: ca-bundle.crt
+              path: ca-bundle.crt
+          optional: false
+    stepTemplate:
+      volumeMounts:
+        - name: trusted-ca
+          mountPath: /mnt/trusted-ca
+          readOnly: true
+    steps:
+      - name: verify-ca-file-env
+        image: quay.io/redhat-appstudio/build-trusted-artifacts:e02102ede09aa07187cba066ad547a54724e5cf4
+        env:
+          - name: CA_FILE
+            value: $(params.caCertPath)
+        script: |
+          #!/bin/bash
+          set -e
+
+          echo "==========================================="
+          echo "Testing CA_FILE Environment Variable Support"
+          echo "==========================================="
+          echo ""
+
+          # Check if CA_FILE is set
+          if [ -z "$CA_FILE" ]; then
+            echo "❌ ERROR: CA_FILE environment variable is not set"
+            exit 1
+          fi
+          echo "✓ CA_FILE is set to: $CA_FILE"
+          echo ""
+
+          # Check if the file exists at the path
+          if [ ! -f "$CA_FILE" ]; then
+            echo "❌ ERROR: Certificate file does not exist at $CA_FILE"
+            exit 1
+          fi
+          echo "✓ Certificate file exists at $CA_FILE"
+          echo ""
+
+          # Verify file is readable
+          if ! cat "$CA_FILE" > /dev/null; then
+            echo "❌ ERROR: Cannot read certificate file"
+            exit 1
+          fi
+          echo "✓ Certificate file is readable"
+          echo ""
+
+          # Show certificate info
+          echo "Certificate content (first 10 lines):"
+          echo "---"
+          head -10 "$CA_FILE"
+          echo "---"
+          echo ""
+
+          # Verify oras_opts.sh behavior
+          echo "Testing oras_opts.sh integration..."
+          if [ ! -f "/oras_opts.sh" ]; then
+            echo "❌ ERROR: /oras_opts.sh not found in container"
+            exit 1
+          fi
+
+          source /oras_opts.sh
+          echo "✓ Sourced oras_opts.sh successfully"
+          echo ""
+
+          # Check if --ca-file is added to oras_opts
+          echo "Checking if --ca-file flag was added to oras_opts array..."
+          echo "oras_opts contents: ${oras_opts[@]}"
+          echo ""
+
+          if [[ " ${oras_opts[@]} " =~ " --ca-file=${CA_FILE} " ]]; then
+            echo "✓ SUCCESS: --ca-file=${CA_FILE} was added to oras_opts"
+          else
+            echo "❌ ERROR: --ca-file was not added to oras_opts"
+            echo "Expected: --ca-file=${CA_FILE}"
+            echo "Got oras_opts: ${oras_opts[@]}"
+            exit 1
+          fi
+
+          echo ""
+          echo "==========================================="
+          echo "✓ All checks passed!"
+          echo "CA certificate support is working correctly."
+          echo "==========================================="
