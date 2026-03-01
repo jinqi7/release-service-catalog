@@ -11,11 +11,17 @@ spec:
     # Set HOME variable to something else than `/` to avoid 'permission denied' problems when writing files.
     - name: HOME
       value: /tekton/home
+    - name: CA_FILE
+      value: $(params.caCertPath)
   params:
     - name: sourceDataArtifacts
       type: array
       description: Array of artifacts to extract
       default: []
+    - name: caCertPath
+      type: string
+      default: ""
+      description: Path to CA certificate bundle for TLS verification with self-signed certificates
   args:
     - use
     - "$(params.sourceDataArtifacts[*])"
