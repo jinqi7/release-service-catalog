@@ -13,6 +13,12 @@ spec:
       value: /tekton/home
     - name: ORAS_OPTIONS
       value: $(params.orasOptions)
+    - name: CA_CERT_PATH_PARAM
+      value: $(params.caCertPath)
+    - name: WORK_DIR
+      value: $(params.workDir)
+    - name: SOURCE_DATA_ARTIFACT
+      value: $(params.sourceDataArtifact)
   params:
     - name: workDir
       type: string
@@ -23,6 +29,24 @@ spec:
       type: string
       default: ""
       description: oras options to pass to Trusted Artifacts calls
+    - name: caCertPath
+      type: string
+      default: ""
+      description: Path to CA certificate bundle for TLS verification with self-signed certificates
+  command:
+    - /bin/sh
+    - -c
   args:
-    - use
-    - $(params.sourceDataArtifact)=$(params.workDir)
+    - |
+      # Only set CA_FILE if caCertPath is non-empty AND file exists
+      # This avoids overriding system trust store and prevents "file not found" errors
+      if [ -n "$CA_CERT_PATH_PARAM" ] && [ -f "$CA_CERT_PATH_PARAM" ]; then
+        export CA_FILE="$CA_CERT_PATH_PARAM"
+        echo "Using custom CA certificate: $CA_FILE"
+      elif [ -n "$CA_CERT_PATH_PARAM" ]; then
+        echo "Warning: CA certificate path provided but file not found: $CA_CERT_PATH_PARAM"
+        echo "Falling back to system trust store"
+      fi
+
+      # Call use-archive directly - use env vars instead of param substitution
+      /usr/local/bin/use-archive "${SOURCE_DATA_ARTIFACT}=${WORK_DIR}"

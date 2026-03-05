@@ -385,3 +385,5 @@ spec:
           value: $(params.dataDir)
         - name: sourceDataArtifact
           value: $(results.sourceDataArtifact.path)
+        - name: caCertPath
+          value: /mnt/trusted-ca/ca-bundle.crt
