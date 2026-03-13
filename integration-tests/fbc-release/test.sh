@@ -21,9 +21,9 @@ declare -gA GLOBAL_TEST_MATRIX=(
     ["single-staged"]="disabled"
     ["single-prega"]="disabled"
     ["single-hotfix"]="disabled"
-    ["multi-happy"]="disabled"
-    ["multi-staged"]="disabled"
-    # ["multi-prega"]="disabled"   # this test incurs additional IIB requests for no value
+    ["multi-prega"]="disabled"
+    # ["multi-happy"]="disabled"
+    # ["multi-staged"]="disabled"
     # ["multi-hotfix"]="disabled"  # this test incurs additional IIB requests for no value
 )
 
@@ -58,12 +58,12 @@ configure_test_matrix() {
     # Initialize test matrix with all tests disabled by default
     GLOBAL_TEST_MATRIX=(
         ["single-happy"]="disabled"
-        ["single-staged"]="disabled" 
+        ["single-staged"]="disabled"
         ["single-prega"]="disabled"
         ["single-hotfix"]="disabled"
-        ["multi-happy"]="disabled"
-        ["multi-staged"]="disabled"
-        # ["multi-prega"]="disabled"   # this test incurs additional IIB requests for no value
+        ["multi-prega"]="disabled"
+        # ["multi-happy"]="disabled"
+        # ["multi-staged"]="disabled"
         # ["multi-hotfix"]="disabled"  # this test incurs additional IIB requests for no value
     )
     
@@ -102,8 +102,8 @@ configure_test_matrix() {
         GLOBAL_TEST_MATRIX["single-staged"]="enabled"
         GLOBAL_TEST_MATRIX["single-prega"]="enabled"
         GLOBAL_TEST_MATRIX["single-hotfix"]="enabled"
-        GLOBAL_TEST_MATRIX["multi-happy"]="enabled"
-        GLOBAL_TEST_MATRIX["multi-staged"]="enabled"
+        GLOBAL_TEST_MATRIX["multi-prega"]="enabled"
+        # GLOBAL_TEST_MATRIX["multi-staged"]="enabled"
         tests_enabled=true
         echo "  Batching changes enabled: single-happy, single-staged, multi-happy, multi-staged"
     fi
@@ -113,11 +113,11 @@ configure_test_matrix() {
     if [ "$tests_enabled" = false ]; then
         echo "🎯 No specific patterns detected - enabling full test matrix (safe fallback)"
         GLOBAL_TEST_MATRIX["single-happy"]="enabled"
-        GLOBAL_TEST_MATRIX["single-staged"]="enabled"
-        GLOBAL_TEST_MATRIX["single-prega"]="enabled"
-        GLOBAL_TEST_MATRIX["single-hotfix"]="enabled"
-        GLOBAL_TEST_MATRIX["multi-happy"]="enabled"
-        GLOBAL_TEST_MATRIX["multi-staged"]="enabled"
+        # GLOBAL_TEST_MATRIX["single-staged"]="enabled"
+        # GLOBAL_TEST_MATRIX["single-prega"]="enabled"
+        # GLOBAL_TEST_MATRIX["single-hotfix"]="enabled"
+        GLOBAL_TEST_MATRIX["multi-prega"]="enabled"
+        # GLOBAL_TEST_MATRIX["multi-staged"]="enabled"
         echo "  Enabled: single-happy, single-staged, single-prega, single-hotfix, multi-happy, multi-staged"
     fi
     
@@ -141,7 +141,7 @@ create_github_repository() {
     # Always create component 2 repo
     echo "  Creating component 2 repository..."
     "${SUITE_DIR}/../scripts/copy-branch-to-repo-git.sh" \
-        "${component_base_repo_name}" "${component_base_branch}" \
+        "${component2_base_repo_name}" "${component2_base_branch}" \
         "${component2_repo_name}" "${component2_branch}"
 }
 

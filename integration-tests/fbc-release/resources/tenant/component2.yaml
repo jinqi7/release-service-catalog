@@ -16,7 +16,7 @@ spec:
   secret: pipelines-as-code-secret-${component2_name}
   source:
     git:
-      dockerfileUrl: catalog.Dockerfile
+      dockerfileUrl: Containerfile.catalog
       revision: ${component2_branch}
-      context: "4.13"          # Same as component1 for batching
+      context: "."
       url: "${component2_git_url}"
