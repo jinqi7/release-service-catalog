@@ -556,6 +556,11 @@ wait_for_releases() {
     export RELEASE_NAMESPACE=${tenant_namespace}
     for release in ${release_names};
     do
+      # Add the originating-tool label to the release CR
+      kubectl patch release "${release}" -n "${tenant_namespace}" \
+        --type merge \
+        -p "{\"metadata\":{\"labels\":{\"originating-tool\":\"${originating_tool}\"}}}"
+
       export RELEASE_NAME=${release}
       "${SUITE_DIR}/../scripts/wait-for-release.sh" &
     done
@@ -591,7 +596,7 @@ cleanup_old_resources() {
 
     echo "🔍 Searching for resources with originating-tool=${originating_tool}"
 
-    local kinds="enterprisecontractpolicy rp rpa rolebinding sa clusterrole secret application component"
+    local kinds="enterprisecontractpolicy rp rpa rolebinding sa clusterrole secret application component release"
     for kind in $kinds; do
         local namespaces="dev-release-team-tenant managed-release-team-tenant"
         for namespace in $namespaces; do

@@ -852,7 +852,12 @@ verify_hotfix_tagging() {
 wait_for_release() {
     local release_name=$1
     echo "⏳ Waiting for release $release_name to complete..."
-    
+
+    # Add the originating-tool label to the release CR
+    kubectl patch release "${release_name}" -n "${tenant_namespace}" \
+      --type merge \
+      -p "{\"metadata\":{\"labels\":{\"originating-tool\":\"${originating_tool}\"}}}"
+
     export RELEASE_NAME=${release_name}
     export RELEASE_NAMESPACE=${tenant_namespace}
     "${SUITE_DIR}/../scripts/wait-for-release.sh"
