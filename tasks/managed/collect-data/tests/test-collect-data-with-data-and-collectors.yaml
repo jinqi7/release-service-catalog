@@ -61,9 +61,6 @@ spec:
               spec:
                 snapshot: foo
                 releasePlan: foo
-                data:
-                  rkey: rvalue
-                  foo: shouldGetOverwritten
               EOF
               kubectl apply -f release
 
@@ -84,9 +81,6 @@ spec:
               spec:
                 application: foo
                 target: foo
-                data:
-                  foo: bar
-                  one: one
               EOF
               kubectl apply -f releaseplan
 
@@ -101,7 +95,7 @@ spec:
                   - foo
                 origin: foo
                 data:
-                  singleComponentMode: true
+                  singleComponentMode: false
                   one:
                     two: three
                     four:
