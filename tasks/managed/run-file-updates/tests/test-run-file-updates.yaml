@@ -24,7 +24,7 @@ spec:
       type: string
       default: ""
     - name: dataDir
-      description: The location where data will be stored
+      description: The location where data will be stored test
       type: string
   tasks:
     - name: setup
