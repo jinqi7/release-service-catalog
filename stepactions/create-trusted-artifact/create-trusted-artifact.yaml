@@ -14,6 +14,8 @@ spec:
       value: /tekton/home
     - name: ORAS_OPTIONS
       value: $(params.orasOptions)
+    - name: CA_FILE
+      value: $(params.caCertPath)
   params:
     - name: ociStorage
       type: string
@@ -27,6 +29,10 @@ spec:
       type: string
       default: ""
       description: oras options to pass to Trusted Artifacts calls
+    - name: caCertPath
+      type: string
+      default: ""
+      description: Path to CA certificate bundle for TLS verification with self-signed certificates
   args:
     - create
     - --store
